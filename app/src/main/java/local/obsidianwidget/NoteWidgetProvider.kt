@@ -30,7 +30,10 @@ class NoteWidgetProvider : AppWidgetProvider() {
     }
 
     override fun onDeleted(ctx: Context, ids: IntArray) {
-        for (id in ids) WidgetStore.delete(ctx, id)
+        for (id in ids) {
+            WidgetStore.delete(ctx, id)
+            NoteRows.forget(ctx, id)
+        }
     }
 
     override fun onReceive(ctx: Context, intent: Intent) {

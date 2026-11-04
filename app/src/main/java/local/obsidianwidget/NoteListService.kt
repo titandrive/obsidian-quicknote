@@ -13,6 +13,9 @@ import android.util.TypedValue
 import android.widget.RemoteViews
 import android.widget.RemoteViewsService
 import java.io.ByteArrayOutputStream
+import java.io.DataInputStream
+import java.io.DataOutputStream
+import java.io.File
 
 /**
  * The rendered rows of a widget's note. On Android 12+ they're handed to the launcher all at once
@@ -35,6 +38,14 @@ object NoteRows {
         val cfg = WidgetStore.load(ctx, id) ?: return null
         val p = cfg.palette(ctx)
         val text = Vault.read(ctx, cfg.uri)
+        // The list's width: the widget minus its side padding.
+        val width = (TextBitmaps.widgetWidth(ctx, id) - dp(ctx, 14 + 6 + 8)).coerceAtLeast(1)
+        val key = cacheKey(ctx, cfg, text, width)
+        cached(ctx, id, key)?.let { return it to p }
+        return render(ctx, cfg, p, text, width).also { save(ctx, id, key, it) } to p
+    }
+
+    private fun render(ctx: Context, cfg: WidgetConfig, p: Palette, text: String?, width: Int): List<Row> {
         val indent = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, cfg.textSize * 1.2f, ctx.resources.displayMetrics).toInt()
         val blocks = if (text == null) {
             listOf(Block("Couldn't read ${cfg.notePath}. It may have been moved or renamed; tap the note's name to pick it again.", 0))
@@ -42,8 +53,6 @@ object NoteRows {
             Markdown.render(text, p, indent)
         }
         val paint = TextBitmaps.paint(ctx, Fonts.typeface(cfg.fontFile), cfg.textSize, p.text)
-        // The list's width: the widget minus its side padding.
-        val width = (TextBitmaps.widgetWidth(ctx, id) - dp(ctx, 14 + 6 + 8)).coerceAtLeast(1)
         fun layout(t: CharSequence, w: Int) = StaticLayout.Builder.obtain(t, 0, t.length, paint, w.coerceAtLeast(1))
             .setAlignment(Layout.Alignment.ALIGN_NORMAL).setLineSpacing(0f, 1.15f).setIncludePad(true).build()
 
@@ -96,7 +105,72 @@ object NoteRows {
             val firstOfBlock = under.top >= top
             Row(compress(bmp), under.block.line, under.block.task, if (firstOfBlock) under.block.text else null)
         }
-        return rows to p
+        return rows
+    }
+
+    /*
+     * Rendered rows are kept, in memory and in the cache folder, keyed by everything that goes
+     * into them. The launcher asks for a widget's rows again whenever it redraws it (after an
+     * unlock, or coming back from an app), often after the app was frozen or closed; rendering
+     * them again left the widget blank for a moment.
+     */
+    private val memory = HashMap<Int, Pair<String, List<Row>>>()
+
+    private fun cacheKey(ctx: Context, cfg: WidgetConfig, text: String?, width: Int): String {
+        val res = ctx.resources
+        // The app's install time stands in for its version, since rendering changes with it.
+        val installed = ctx.packageManager.getPackageInfo(ctx.packageName, 0).lastUpdateTime
+        val parts = listOf(
+            cfg.toJson().toString(), text.orEmpty(), width, cfg.isDark(ctx),
+            res.displayMetrics.densityDpi, res.configuration.fontScale, installed,
+        ).joinToString("\u0000")
+        val digest = java.security.MessageDigest.getInstance("SHA-256").digest(parts.toByteArray())
+        return digest.joinToString("") { "%02x".format(it) }
+    }
+
+    private fun cacheFile(ctx: Context, id: Int) = File(ctx.cacheDir, "rows-$id.bin")
+
+    private fun cached(ctx: Context, id: Int, key: String): List<Row>? = synchronized(memory) {
+        memory[id]?.takeIf { it.first == key }?.second
+            ?: runCatching {
+                DataInputStream(cacheFile(ctx, id).inputStream().buffered()).use { input ->
+                    if (input.readUTF() != key) return@use null
+                    List(input.readInt()) {
+                        val line = input.readInt()
+                        val task = input.readBoolean()
+                        val text = if (input.readBoolean()) input.readUTF() else null
+                        val image = ByteArray(input.readInt()).also(input::readFully)
+                        Row(image, line, task, text)
+                    }
+                }
+            }.getOrNull()?.also { memory[id] = key to it }
+    }
+
+    private fun save(ctx: Context, id: Int, key: String, rows: List<Row>) = synchronized(memory) {
+        memory[id] = key to rows
+        runCatching {
+            val file = cacheFile(ctx, id)
+            val tmp = File(file.path + ".tmp")
+            DataOutputStream(tmp.outputStream().buffered()).use { out ->
+                out.writeUTF(key)
+                out.writeInt(rows.size)
+                for (r in rows) {
+                    out.writeInt(r.line)
+                    out.writeBoolean(r.task)
+                    out.writeBoolean(r.text != null)
+                    // writeUTF takes at most 64 KB; this only feeds screen readers.
+                    r.text?.let { out.writeUTF(it.toString().take(8000)) }
+                    out.writeInt(r.image.size)
+                    out.write(r.image)
+                }
+            }
+            tmp.renameTo(file)
+        }
+    }
+
+    fun forget(ctx: Context, id: Int) = synchronized(memory) {
+        memory.remove(id)
+        cacheFile(ctx, id).delete()
     }
 
     fun view(ctx: Context, row: Row): RemoteViews = RemoteViews(ctx.packageName, R.layout.widget_item).apply {
