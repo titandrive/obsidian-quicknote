@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The refresh icon turning, for the spinner shown while the widget refreshes. -->
+<rotate xmlns:android="http://schemas.android.com/apk/res/android"
+    android:drawable="@drawable/ic_refresh"
+    android:fromDegrees="0"
+    android:toDegrees="360"
+    android:pivotX="50%"
+    android:pivotY="50%" />

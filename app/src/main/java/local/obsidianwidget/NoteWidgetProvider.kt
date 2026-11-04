@@ -35,24 +35,31 @@ class NoteWidgetProvider : AppWidgetProvider() {
 
     override fun onReceive(ctx: Context, intent: Intent) {
         when (intent.action) {
-            ACTION_REFRESH -> refresh(ctx, intArrayOf(intent.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, AppWidgetManager.INVALID_APPWIDGET_ID)))
+            ACTION_REFRESH -> refresh(ctx, intArrayOf(intent.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, AppWidgetManager.INVALID_APPWIDGET_ID)), spin = true)
             Intent.ACTION_MY_PACKAGE_REPLACED -> refresh(ctx, allIds(ctx))
             else -> super.onReceive(ctx, intent)
         }
     }
 
-    /** Re-reads the theme and font from the vault, then redraws the widgets and their notes. */
-    private fun refresh(ctx: Context, ids: IntArray) {
+    /**
+     * Re-reads the theme and font from the vault, then redraws the widgets and their notes. With
+     * [spin], the refresh button turns until it's done (asked for by tapping it).
+     */
+    private fun refresh(ctx: Context, ids: IntArray, spin: Boolean = false) {
         val result = goAsync()
         thread {
             try {
                 val mgr = AppWidgetManager.getInstance(ctx)
+                val started = android.os.SystemClock.uptimeMillis()
+                if (spin) for (id in ids) mgr.partiallyUpdateAppWidget(id, spinner(ctx, id, true))
                 for (id in ids) {
                     WidgetStore.load(ctx, id)?.let { cfg ->
                         runCatching { ObsidianTheme.load(ctx, cfg.theme) }.onSuccess {
                             WidgetStore.save(ctx, id, cfg.copy(colors = it))
                         }
                     }
+                    // Long enough to see it turn, even when the refresh is quick.
+                    if (spin) android.os.SystemClock.sleep((MIN_SPIN - (android.os.SystemClock.uptimeMillis() - started)).coerceAtLeast(0))
                     update(ctx, mgr, id)
                 }
             } finally {
@@ -63,6 +70,20 @@ class NoteWidgetProvider : AppWidgetProvider() {
 
     companion object {
         const val ACTION_REFRESH = "local.obsidianwidget.REFRESH"
+        private const val MIN_SPIN = 600L
+
+        /** Swaps the refresh button for its spinning version, or back. */
+        private fun spinner(ctx: Context, id: Int, on: Boolean) = RemoteViews(ctx.packageName, R.layout.widget_note).also {
+            applySpinner(ctx, it, WidgetStore.load(ctx, id)?.palette(ctx) ?: Palette.FALLBACK_DARK, on)
+        }
+
+        private fun applySpinner(ctx: Context, views: RemoteViews, p: Palette, on: Boolean) {
+            views.setViewVisibility(R.id.btn_refresh, if (on) android.view.View.GONE else android.view.View.VISIBLE)
+            views.setViewVisibility(R.id.refresh_spin, if (on) android.view.View.VISIBLE else android.view.View.GONE)
+            if (android.os.Build.VERSION.SDK_INT >= 31) {
+                views.setColorStateList(R.id.refresh_spin, "setIndeterminateTintList", android.content.res.ColorStateList.valueOf(p.muted))
+            }
+        }
 
         /**
          * Most a note's rows may add up to and still be sent with the widget. The system passes the
@@ -82,6 +103,8 @@ class NoteWidgetProvider : AppWidgetProvider() {
             for (button in listOf(R.id.btn_refresh, R.id.btn_edit, R.id.btn_open, R.id.btn_settings)) {
                 views.setInt(button, "setColorFilter", p.muted)
             }
+            // A launcher may reapply this onto the existing views, so set the still icon back explicitly.
+            applySpinner(ctx, views, p, false)
 
             if (cfg == null) {
                 views.setImageViewBitmap(R.id.title, title(ctx, id, null, ctx.getString(R.string.app_name), p))

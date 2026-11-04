@@ -50,6 +50,17 @@
                 android:src="@drawable/ic_refresh"
                 android:contentDescription="@string/refresh" />
 
+            <!-- Takes the refresh button's place while refreshing; a widget can't animate an image itself. -->
+            <ProgressBar
+                android:id="@+id/refresh_spin"
+                android:layout_width="34dp"
+                android:layout_height="34dp"
+                android:padding="8dp"
+                android:indeterminate="true"
+                android:indeterminateDrawable="@drawable/refresh_spin"
+                android:indeterminateDuration="900"
+                android:visibility="gone" />
+
             <ImageView
                 android:id="@+id/btn_open"
                 android:layout_width="34dp"
