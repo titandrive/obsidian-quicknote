@@ -27,8 +27,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.selection.LocalTextSelectionColors
 import androidx.compose.foundation.text.selection.TextSelectionColors
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -224,7 +222,7 @@ class EditorActivity : ComponentActivity() {
                         Icon(painterResource(R.drawable.ic_open), "Open in Obsidian", Modifier.size(20.dp), tint = Color(p.muted))
                     }
                     IconButton(onClick = { done() }) {
-                        Icon(Icons.Default.Check, "Done", tint = accent)
+                        Icon(painterResource(R.drawable.ic_check), "Done", Modifier.size(22.dp), tint = accent)
                     }
                 }
                 CompositionLocalProvider(LocalTextSelectionColors provides TextSelectionColors(accent, accent.copy(alpha = 0.35f))) {

@@ -4,6 +4,7 @@
     <string name="refresh">Refresh</string>
     <string name="edit">Edit note</string>
     <string name="change_note">Change note</string>
+    <string name="settings">Widget settings</string>
     <string name="open_in_obsidian">Open in Obsidian</string>
     <string name="empty_note">Empty note. Tap to write.</string>
 </resources>

@@ -27,7 +27,7 @@ class NoteListService : RemoteViewsService() {
             val text = Vault.read(ctx, cfg.uri)
             val indent = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, cfg.textSize * 1.2f, ctx.resources.displayMetrics).toInt()
             val blocks = if (text == null) {
-                listOf(Block("Couldn't read ${cfg.notePath}. It may have been moved or renamed; tap ⇄ to pick it again.", 0))
+                listOf(Block("Couldn't read ${cfg.notePath}. It may have been moved or renamed; tap the note's name to pick it again.", 0))
             } else {
                 Markdown.render(text, palette, indent)
             }

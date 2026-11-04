@@ -44,15 +44,6 @@
                 android:padding="8dp"
                 android:src="@drawable/ic_refresh"
                 android:contentDescription="@string/refresh" />
-
-            <ImageView
-                android:id="@+id/btn_change"
-                android:layout_width="34dp"
-                android:layout_height="34dp"
-                android:padding="7dp"
-                android:src="@drawable/ic_swap"
-                android:contentDescription="@string/change_note" />
-
             <ImageView
                 android:id="@+id/btn_edit"
                 android:layout_width="34dp"
@@ -68,6 +59,14 @@
                 android:padding="8dp"
                 android:src="@drawable/ic_open"
                 android:contentDescription="@string/open_in_obsidian" />
+
+            <ImageView
+                android:id="@+id/btn_settings"
+                android:layout_width="34dp"
+                android:layout_height="34dp"
+                android:padding="8dp"
+                android:src="@drawable/ic_settings"
+                android:contentDescription="@string/settings" />
         </LinearLayout>
 
         <FrameLayout

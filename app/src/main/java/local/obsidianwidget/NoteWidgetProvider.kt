@@ -64,7 +64,7 @@ class NoteWidgetProvider : AppWidgetProvider() {
             views.setInt(R.id.bg, "setColorFilter", p.background)
             views.setInt(R.id.bg, "setImageAlpha", ((cfg?.opacity ?: 100) * 255 / 100))
             views.setTextColor(R.id.empty, p.faint)
-            for (button in listOf(R.id.btn_refresh, R.id.btn_change, R.id.btn_edit, R.id.btn_open)) {
+            for (button in listOf(R.id.btn_refresh, R.id.btn_edit, R.id.btn_open, R.id.btn_settings)) {
                 views.setInt(button, "setColorFilter", p.muted)
             }
 
@@ -74,6 +74,7 @@ class NoteWidgetProvider : AppWidgetProvider() {
                 val setup = activity(ctx, id, 0, configIntent(ctx, id, pickOnly = false))
                 views.setOnClickPendingIntent(R.id.empty, setup)
                 views.setOnClickPendingIntent(R.id.title, setup)
+                views.setOnClickPendingIntent(R.id.btn_settings, setup)
                 mgr.updateAppWidget(id, views)
                 return
             }
@@ -100,8 +101,9 @@ class NoteWidgetProvider : AppWidgetProvider() {
             val edit = activity(ctx, id, 2, editorIntent(ctx, id))
             views.setOnClickPendingIntent(R.id.btn_edit, edit)
             views.setOnClickPendingIntent(R.id.empty, edit)
-            views.setOnClickPendingIntent(R.id.btn_change, activity(ctx, id, 3, configIntent(ctx, id, pickOnly = true)))
-            views.setOnClickPendingIntent(R.id.title, activity(ctx, id, 4, configIntent(ctx, id, pickOnly = false)))
+            // The note's name switches notes; the cog has the rest of the settings.
+            views.setOnClickPendingIntent(R.id.title, activity(ctx, id, 3, configIntent(ctx, id, pickOnly = true)))
+            views.setOnClickPendingIntent(R.id.btn_settings, activity(ctx, id, 4, configIntent(ctx, id, pickOnly = false)))
             views.setOnClickPendingIntent(
                 R.id.btn_open,
                 activity(ctx, id, 5, Intent(Intent.ACTION_VIEW, Vault.openUri(ctx, cfg.notePath)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)),

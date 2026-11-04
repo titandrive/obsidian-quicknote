@@ -55,8 +55,9 @@ class MainActivity : ComponentActivity() {
                             On the widget:
                             • Tap the note to edit it right there; it saves when you tap ✓ or outside the card.
                             • Tap a task to tick it off.
-                            • ⇄ switches to another note, ↗ opens it in Obsidian, ⟳ re-reads the note and theme.
-                            • Tap the title for theme, light/dark, opacity and text size.
+                            • Tap the note's name to switch to another note.
+                            • ⟳ re-reads the note and theme, ✎ edits, ↗ opens it in Obsidian.
+                            • The cog has theme, light/dark, opacity and text size.
                             """.trimIndent(),
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
