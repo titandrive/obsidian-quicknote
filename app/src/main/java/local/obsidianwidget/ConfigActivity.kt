@@ -79,7 +79,6 @@ class ConfigActivity : ComponentActivity() {
         const val EXTRA_PICK_ONLY = "pick_only"
 
         private val MODES = listOf("vault", "system", "light", "dark")
-        private val TEXT_SIZES = listOf(12f, 13f, 14f, 16f, 18f)
     }
 
     private var widgetId = AppWidgetManager.INVALID_APPWIDGET_ID
@@ -277,8 +276,8 @@ class ConfigActivity : ComponentActivity() {
                             PillSegmented(MODES, mode, { if (it == "vault") "Obsidian" else it.replaceFirstChar(Char::uppercase) }) { mode = it }
                             SettingLabel("Background opacity", value = "$opacity%")
                             StepSlider(opacity, 0..100, step = 5) { opacity = it }
-                            SettingLabel("Text size")
-                            PillSegmented(TEXT_SIZES, textSize, { "${it.toInt()}" }) { textSize = it }
+                            SettingLabel("Text size", value = "${textSize.toInt()}")
+                            StepSlider(textSize.toInt(), 10..19, step = 1) { textSize = it.toFloat() }
                             SwitchRow("Show header", null, showHeader) { showHeader = it }
                         }
 
@@ -317,7 +316,7 @@ class ConfigActivity : ComponentActivity() {
                 .fillMaxWidth()
                 // Unclipped bounds: when scrolled partly under the header, the header covers the rest.
                 .onGloballyPositioned { onBounds(Rect(it.positionInRoot(), it.size.toSize())) }
-                .padding(18.dp),
+                .padding(12.dp),
         ) {
             Column(
                 Modifier
@@ -325,7 +324,7 @@ class ConfigActivity : ComponentActivity() {
                     .clip(RoundedCornerShape(20.dp))
                     .background(Color(p.background).copy(alpha = cfg.opacity / 100f))
                     .padding(start = 14.dp, end = 8.dp, top = 6.dp, bottom = 12.dp)
-                    .heightIn(max = 230.dp),
+                    .heightIn(max = 170.dp),
             ) {
                 if (cfg.showHeader) Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.height(34.dp)) {
                     Text(
