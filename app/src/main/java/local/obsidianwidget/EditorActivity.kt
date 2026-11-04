@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -210,7 +211,7 @@ class EditorActivity : ComponentActivity() {
             ) {
                 // The widget's header, button for button (widget_note.xml), with done where the widget has edit.
                 Row(
-                    Modifier.padding(start = 14.dp, end = 6.dp, top = 6.dp).height(34.dp),
+                    Modifier.padding(start = 14.dp, end = 6.dp, top = 6.dp).heightIn(min = 34.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(

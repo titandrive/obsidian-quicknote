@@ -28,14 +28,18 @@
             android:gravity="center_vertical"
             android:orientation="horizontal">
 
-            <!-- Drawn as an image so it can use the vault's font. -->
+            <!--
+                Drawn as an image so it can use the vault's font. Sized to the image rather than
+                squeezed into the row, so it isn't shrunk at large system font sizes.
+            -->
             <ImageView
                 android:id="@+id/title"
                 android:layout_width="0dp"
-                android:layout_height="34dp"
+                android:layout_height="wrap_content"
                 android:layout_weight="1"
+                android:minHeight="34dp"
                 android:scaleType="fitStart"
-                android:paddingVertical="8dp" />
+                android:paddingVertical="6dp" />
 
             <ImageView
                 android:id="@+id/btn_refresh"
