@@ -56,7 +56,7 @@
             android:taskAffinity=""
             android:excludeFromRecents="true"
             android:noHistory="true"
-            android:theme="@style/Theme.ObsidianWidget.Tap" />
+            android:theme="@android:style/Theme.NoDisplay" />
 
         <receiver
             android:name=".NoteWidgetProvider"

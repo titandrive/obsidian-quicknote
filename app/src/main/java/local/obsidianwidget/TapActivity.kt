@@ -3,11 +3,12 @@ package local.obsidianwidget
 import android.app.Activity
 import android.appwidget.AppWidgetManager
 import android.content.Intent
+import android.os.Bundle
 import kotlin.concurrent.thread
 
 /**
- * Where every tap on the widget lands. An invisible window: it gives the light tick a widget can't
- * give by itself, then does what was tapped: ticks a task, opens the editor at a line, refreshes,
+ * Where every tap on the widget lands. It draws no window (Theme.NoDisplay): it gives the light tick
+ * a widget can't give by itself, then does what was tapped: ticks a task, opens the editor at a line, refreshes,
  * or starts the screen in [EXTRA_FORWARD] (settings, Obsidian, the note chooser).
  */
 class TapActivity : Activity() {
@@ -17,10 +18,9 @@ class TapActivity : Activity() {
         const val EXTRA_REFRESH = "refresh"
     }
 
-    override fun onResume() {
-        super.onResume()
-        // Only once resumed: before that the app counts as in the background, and the tick is dropped.
-        Haptics.tick(this)
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        Haptics.widgetTick(this)
         val id = intent.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, AppWidgetManager.INVALID_APPWIDGET_ID)
         @Suppress("DEPRECATION")
         val forward = intent.getParcelableExtra<Intent>(EXTRA_FORWARD)
@@ -42,8 +42,7 @@ class TapActivity : Activity() {
                 }
             }
         }
+        // A NoDisplay activity has to finish before it would be shown.
         finish()
-        @Suppress("DEPRECATION")
-        overridePendingTransition(0, 0)
     }
 }
