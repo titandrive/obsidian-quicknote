@@ -94,9 +94,7 @@ class ConfigActivity : ComponentActivity() {
         val full = if (cfg.colors != null) cfg
         else cfg.copy(colors = withContext(Dispatchers.IO) { ObsidianTheme.load(this@ConfigActivity, cfg.theme) })
         WidgetStore.save(this, widgetId, full)
-        val mgr = AppWidgetManager.getInstance(this)
-        NoteWidgetProvider.update(this, mgr, widgetId)
-        mgr.notifyAppWidgetViewDataChanged(widgetId, R.id.list)
+        withContext(Dispatchers.IO) { NoteWidgetProvider.update(this@ConfigActivity, AppWidgetManager.getInstance(this@ConfigActivity), widgetId) }
         setResult(Activity.RESULT_OK, Intent().putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, widgetId))
         finish()
     }

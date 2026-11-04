@@ -19,8 +19,14 @@ class NoteWidgetProvider : AppWidgetProvider() {
 
     override fun onAppWidgetOptionsChanged(ctx: Context, mgr: AppWidgetManager, id: Int, options: android.os.Bundle) {
         // Resized: redraw the rows at the new width.
-        update(ctx, mgr, id)
-        mgr.notifyAppWidgetViewDataChanged(id, R.id.list)
+        val result = goAsync()
+        thread {
+            try {
+                update(ctx, mgr, id)
+            } finally {
+                result.finish()
+            }
+        }
     }
 
     override fun onDeleted(ctx: Context, ids: IntArray) {
@@ -46,7 +52,6 @@ class NoteWidgetProvider : AppWidgetProvider() {
                     }
                     update(ctx, mgr, id)
                 }
-                mgr.notifyAppWidgetViewDataChanged(ids, R.id.list)
             } finally {
                 result.finish()
             }
@@ -56,6 +61,13 @@ class NoteWidgetProvider : AppWidgetProvider() {
     companion object {
         const val ACTION_REFRESH = "local.obsidianwidget.REFRESH"
 
+        /**
+         * Most a note's rows may add up to and still be sent with the widget; the whole update has
+         * to fit in one cross-process call (1 MB, shared with everything else in flight).
+         */
+        private const val INLINE_LIMIT = 500_000
+
+        /** Redraws the widget, note and all. Reads and renders the note, so call it off the main thread. */
         fun update(ctx: Context, mgr: AppWidgetManager, id: Int) {
             val cfg = WidgetStore.load(ctx, id)
             val views = RemoteViews(ctx.packageName, R.layout.widget_note)
@@ -83,12 +95,23 @@ class NoteWidgetProvider : AppWidgetProvider() {
             views.setContentDescription(R.id.title, cfg.title)
             views.setTextViewText(R.id.empty, ctx.getString(R.string.empty_note))
 
-            val service = Intent(ctx, NoteListService::class.java)
-                .putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, id)
-            // A unique data URI per widget, or the launcher reuses one widget's list for another.
-            service.data = Uri.parse(service.toUri(Intent.URI_INTENT_SCHEME))
-            @Suppress("DEPRECATION")
-            views.setRemoteAdapter(R.id.list, service)
+            // On Android 12+ every row goes with the widget, so the launcher never fetches rows while
+            // scrolling (fetching showed placeholders that jumped to the real rows' heights).
+            val rows = if (android.os.Build.VERSION.SDK_INT >= 31) NoteRows.build(ctx, id) else null
+            val inline = rows != null && rows.first.sumOf { it.png?.size ?: 0 } < INLINE_LIMIT
+            if (inline && android.os.Build.VERSION.SDK_INT >= 31) {
+                val (list, palette) = rows!!
+                val items = RemoteViews.RemoteCollectionItems.Builder().setHasStableIds(true).setViewTypeCount(1)
+                list.forEachIndexed { i, row -> items.addItem(i.toLong(), NoteRows.view(ctx, row, palette)) }
+                views.setRemoteAdapter(R.id.list, items.build())
+            } else {
+                val service = Intent(ctx, NoteListService::class.java)
+                    .putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, id)
+                // A unique data URI per widget, or the launcher reuses one widget's list for another.
+                service.data = Uri.parse(service.toUri(Intent.URI_INTENT_SCHEME))
+                @Suppress("DEPRECATION")
+                views.setRemoteAdapter(R.id.list, service)
+            }
             views.setEmptyView(R.id.list, R.id.empty)
 
             // Row taps are filled in with the line number and whether it's a task to tick off.
@@ -118,6 +141,7 @@ class NoteWidgetProvider : AppWidgetProvider() {
                 ),
             )
             mgr.updateAppWidget(id, views)
+            if (!inline) mgr.notifyAppWidgetViewDataChanged(id, R.id.list)
         }
 
         private fun title(ctx: Context, id: Int, cfg: WidgetConfig?, text: String, p: Palette): android.graphics.Bitmap {
@@ -130,9 +154,11 @@ class NoteWidgetProvider : AppWidgetProvider() {
 
         /** Redraws every widget showing [noteUri], e.g. after the editor saved it. */
         fun refreshNote(ctx: Context, noteUri: String) {
-            val mgr = AppWidgetManager.getInstance(ctx)
-            val ids = allIds(ctx).filter { WidgetStore.load(ctx, it)?.noteUri == noteUri }.toIntArray()
-            if (ids.isNotEmpty()) mgr.notifyAppWidgetViewDataChanged(ids, R.id.list)
+            val app = ctx.applicationContext
+            thread {
+                val mgr = AppWidgetManager.getInstance(app)
+                for (id in allIds(app)) if (WidgetStore.load(app, id)?.noteUri == noteUri) update(app, mgr, id)
+            }
         }
 
         fun allIds(ctx: Context): IntArray = AppWidgetManager.getInstance(ctx)
