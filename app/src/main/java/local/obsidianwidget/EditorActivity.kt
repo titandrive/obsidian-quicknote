@@ -172,6 +172,9 @@ class EditorActivity : ComponentActivity() {
         val font = remember { Fonts.compose(cfg.fontFile) }
         val focus = remember { FocusRequester() }
         val noRipple = remember { MutableInteractionSource() }
+        // Restyled whenever the cursor moves to another line, so that line's markup shows.
+        val active = LivePreview.activeLines(value.text, value.selection.start, value.selection.end)
+        val preview = remember(active) { LivePreview(p, cfg.textSize, active) }
 
         Box(
             Modifier
@@ -220,6 +223,7 @@ class EditorActivity : ComponentActivity() {
                             .focusRequester(focus),
                         textStyle = TextStyle(color = text, fontSize = cfg.textSize.sp, lineHeight = 1.45.em, fontFamily = font),
                         cursorBrush = SolidColor(accent),
+                        visualTransformation = preview,
                     )
                 }
             }

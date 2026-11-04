@@ -30,17 +30,17 @@ class Block(
  * since those are the ones that survive being sent to the launcher.
  */
 object Markdown {
-    private val HEADING = Regex("^(#{1,6})\\s+(.*?)\\s*#*\\s*$")
-    private val TASK = Regex("^(\\s*)[-*+] \\[(.)] ?(.*)$")
-    private val BULLET = Regex("^(\\s*)[-*+] (.*)$")
-    private val NUMBERED = Regex("^(\\s*)(\\d+[.)]) (.*)$")
-    private val QUOTE = Regex("^\\s*>\\s?(.*)$")
-    private val CALLOUT = Regex("^\\[!(\\w+)][+-]?\\s*(.*)$")
-    private val RULE = Regex("^\\s*([-*_])(\\s*\\1){2,}\\s*$")
-    private val FENCE = Regex("^\\s*(```|~~~)")
+    val HEADING = Regex("^(#{1,6})\\s+(.*?)\\s*#*\\s*$")
+    val TASK = Regex("^(\\s*)[-*+] \\[(.)] ?(.*)$")
+    val BULLET = Regex("^(\\s*)[-*+] (.*)$")
+    val NUMBERED = Regex("^(\\s*)(\\d+[.)]) (.*)$")
+    val QUOTE = Regex("^\\s*>\\s?(.*)$")
+    val CALLOUT = Regex("^\\[!(\\w+)][+-]?\\s*(.*)$")
+    val RULE = Regex("^\\s*([-*_])(\\s*\\1){2,}\\s*$")
+    val FENCE = Regex("^\\s*(```|~~~)")
     val TASK_BOX = Regex("^(\\s*[-*+] \\[)(.)(])")
 
-    private val INLINE = Regex(
+    val INLINE = Regex(
         "(?<code>`[^`]+`)" +
             "|(?<comment>%%.*?%%)" +
             "|(?<wiki>!?\\[\\[[^\\]]+]])" +
@@ -251,7 +251,7 @@ object Markdown {
     private fun withAlpha(c: Int, a: Int) = (c and 0x00FFFFFF) or (a shl 24)
 
     // Colours of Obsidian's built-in callout types.
-    private fun calloutColor(type: String, p: Palette): Int = when (type) {
+    fun calloutColor(type: String, p: Palette): Int = when (type) {
         "note" -> Color.rgb(68, 138, 255)
         "abstract", "summary", "tldr", "info", "todo" -> Color.rgb(0, 176, 255)
         "tip", "hint", "important" -> Color.rgb(0, 191, 165)
