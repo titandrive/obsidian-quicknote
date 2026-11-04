@@ -20,7 +20,7 @@ object Vault {
     private const val PREFS = "vault"
     private const val CONFIG_DIR = ".obsidian"
 
-    private class Entry(val id: String, val name: String, val isDir: Boolean, val modified: Long)
+    private class Entry(val id: String, val name: String, val isDir: Boolean, val modified: Long, val size: Long = 0)
 
     fun tree(ctx: Context): Uri? =
         prefs(ctx).getString("tree", null)?.let(Uri::parse)
@@ -102,6 +102,28 @@ object Vault {
         return DocumentsContract.buildDocumentUriUsingTree(tree, id)
     }
 
+    /**
+     * A fingerprint of the files at [paths] (from the vault root): each one's date and size, and
+     * for a folder its files'. Cheap to get, and changes whenever any of them does.
+     */
+    fun stamp(ctx: Context, paths: List<String>): String {
+        val tree = tree(ctx) ?: return ""
+        // Paths share folders (.obsidian, plugins); list each once.
+        val listed = HashMap<String, List<Entry>>()
+        fun list(id: String) = listed.getOrPut(id) { children(ctx, tree, id) }
+        return paths.joinToString("|") { path ->
+            var parent = DocumentsContract.getTreeDocumentId(tree)
+            var entry: Entry? = null
+            for (part in path.split('/').filter { it.isNotEmpty() }) {
+                entry = list(parent).firstOrNull { it.name == part } ?: return@joinToString "$path:-"
+                parent = entry.id
+            }
+            val e = entry ?: return@joinToString "$path:-"
+            if (e.isDir) "$path:" + list(e.id).sortedBy { it.name }.joinToString(",") { "${it.name}:${it.modified}:${it.size}" }
+            else "$path:${e.modified}:${e.size}"
+        }
+    }
+
     fun readPath(ctx: Context, path: String): String? = find(ctx, path)?.let { read(ctx, it) }
 
     /** Names of the files in the folder at [path] from the vault root. */
@@ -138,12 +160,12 @@ object Vault {
 
     private fun children(ctx: Context, tree: Uri, parentId: String): List<Entry> {
         val uri = DocumentsContract.buildChildDocumentsUriUsingTree(tree, parentId)
-        val cols = arrayOf(Document.COLUMN_DOCUMENT_ID, Document.COLUMN_DISPLAY_NAME, Document.COLUMN_MIME_TYPE, Document.COLUMN_LAST_MODIFIED)
+        val cols = arrayOf(Document.COLUMN_DOCUMENT_ID, Document.COLUMN_DISPLAY_NAME, Document.COLUMN_MIME_TYPE, Document.COLUMN_LAST_MODIFIED, Document.COLUMN_SIZE)
         return runCatching {
             ctx.contentResolver.query(uri, cols, null, null, null)?.use { c ->
                 buildList {
                     while (c.moveToNext()) {
-                        add(Entry(c.getString(0), c.getString(1), c.getString(2) == Document.MIME_TYPE_DIR, c.getLong(3)))
+                        add(Entry(c.getString(0), c.getString(1), c.getString(2) == Document.MIME_TYPE_DIR, c.getLong(3), c.getLong(4)))
                     }
                 }
             }

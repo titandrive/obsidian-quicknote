@@ -155,8 +155,9 @@ class ConfigActivity : ComponentActivity() {
             if (vaultName != null) colors = withContext(Dispatchers.IO) { ObsidianTheme.load(this@ConfigActivity, theme) }
             colors?.let { swatches[theme] = it }
         }
-        LaunchedEffect(pickingTheme) {
-            if (!pickingTheme) return@LaunchedEffect
+        // Swatches for the theme sheet, worked out as soon as the vault's themes are known (cached
+        // ones come back at once), so they're ready by the time the sheet opens.
+        LaunchedEffect(themes) {
             for (t in listOf(ObsidianTheme.THEME_VAULT, ObsidianTheme.THEME_DEFAULT) + themes) {
                 if (t !in swatches) swatches[t] = withContext(Dispatchers.IO) { ObsidianTheme.load(this@ConfigActivity, t) }
             }
