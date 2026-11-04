@@ -1,6 +1,7 @@
 package local.obsidianwidget
 
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextRange
@@ -37,150 +38,203 @@ class LivePreview(
     private val faint = SpanStyle(color = Color(p.faint))
     private val code = SpanStyle(fontFamily = FontFamily.Monospace, color = Color(p.code), background = Color(p.codeBg))
 
-    fun annotate(text: String): AnnotatedString {
-        val b = AnnotatedString.Builder(text)
-        // What's displayed: the text with list markers swapped for bullets and boxes, same length.
-        val shown = text.toCharArray()
-        val lines = text.split('\n')
-        var offset = 0
-        var fence: String? = null
-        var frontMatter = lines.firstOrNull()?.trim() == "---"
-        var callout: Color? = null
+    /** Line-to-line state: inside a code fence, front matter, a callout or a table. */
+    private data class Ctx(val fence: String?, val frontMatter: Boolean, val callout: Int?, val table: Boolean, val first: Boolean)
 
+    /** Everything one line's styling depends on, so a styled line can be reused while none of it changes. */
+    private data class Key(
+        val line: String, val ctx: Ctx, val on: Boolean, val cursorCol: Int, val nextIsTableRule: Boolean,
+        val p: Palette, val baseSp: Float,
+    )
+
+    private class Styled(val text: AnnotatedString, val next: Ctx)
+
+    /**
+     * Styles each line on its own, reusing lines styled before, so typing in a long note only
+     * restyles the line being edited rather than the whole note on every keystroke.
+     */
+    fun annotate(text: String): AnnotatedString {
+        val lines = text.split('\n')
+        val out = AnnotatedString.Builder(text.length)
+        var ctx = Ctx(null, lines.firstOrNull()?.trim() == "---", null, false, true)
+        var offset = 0
         for ((i, raw) in lines.withIndex()) {
             val line = raw.removeSuffix("\r")
-            val start = offset
-            offset += raw.length + 1
             val on = i in active
-            fun style(s: SpanStyle, from: Int = 0, to: Int = line.length) {
-                if (to > from) b.addStyle(s, start + from, start + to)
+            val cursorCol = if (on && cursor in offset..offset + line.length) cursor - offset else -1
+            val nextIsRule = lines.getOrNull(i + 1)?.let { TABLE_RULE.matches(it.removeSuffix("\r")) } == true
+            val key = Key(line, ctx, on, cursorCol, nextIsRule, p, baseSp)
+            val styled = synchronized(cache) { cache[key] } ?: styleLine(line, ctx, on, cursorCol, nextIsRule).also {
+                synchronized(cache) { cache[key] = it }
             }
-            fun markup(from: Int, to: Int) = style(if (on) faint else hidden, from, to)
-            /** Whether the cursor is in [from, to] of this line, i.e. editing that marker. */
-            fun editing(from: Int, to: Int) = cursor in start + from..start + to
+            out.append(styled.text)
+            if (raw.length > line.length) out.append("\r")
+            if (i < lines.lastIndex) out.append('\n')
+            ctx = styled.next.copy(first = false)
+            offset += raw.length + 1
+        }
+        return out.toAnnotatedString()
+    }
 
-            if (frontMatter) {
-                style(faint.copy(fontSize = (baseSp * 0.85f).sp))
-                if (i > 0 && line.trim() == "---") frontMatter = false
-                continue
+    private fun styleLine(line: String, ctx: Ctx, on: Boolean, cursorCol: Int, nextIsTableRule: Boolean): Styled {
+        val b = AnnotatedString.Builder(line)
+        // What's displayed: the line with list markers swapped for bullets and boxes, same length.
+        val shown = line.toCharArray()
+        var fence = ctx.fence
+        var callout = ctx.callout?.let { Color(it) }
+        var table = ctx.table
+        fun style(s: SpanStyle, from: Int = 0, to: Int = line.length) {
+            if (to > from) b.addStyle(s, from, to)
+        }
+        fun markup(from: Int, to: Int) = style(if (on) faint else hidden, from, to)
+        /** Whether the cursor is in [from, to] of this line, i.e. editing that marker. */
+        fun editing(from: Int, to: Int) = cursorCol in from..to
+        fun done(next: Ctx = Ctx(fence, false, callout?.let { it.toArgb() }, table, false)): Styled {
+            val styled = b.toAnnotatedString()
+            return Styled(AnnotatedString(String(shown), styled.spanStyles, styled.paragraphStyles), next)
+        }
+
+        if (ctx.frontMatter) {
+            style(faint.copy(fontSize = (baseSp * 0.85f).sp))
+            val ends = !ctx.first && line.trim() == "---"
+            return done(Ctx(null, !ends, null, false, false))
+        }
+
+        val fenceMatch = Markdown.FENCE.find(line)
+        if (fence != null || fenceMatch != null) {
+            style(code)
+            if (fenceMatch != null) {
+                style(faint)
+                fence = if (fence == null) fenceMatch.groupValues[1] else if (line.trimStart().startsWith(fence)) null else fence
             }
+            return done()
+        }
 
-            val fenceMatch = Markdown.FENCE.find(line)
-            if (fence != null || fenceMatch != null) {
-                style(code)
-                if (fenceMatch != null) {
-                    style(faint)
-                    fence = if (fence == null) fenceMatch.groupValues[1] else if (line.trimStart().startsWith(fence!!)) null else fence
-                }
-                continue
-            }
+        if (line.isBlank()) {
+            callout = null
+            table = false
+            return done()
+        }
 
-            if (line.isBlank()) {
-                callout = null
-                continue
-            }
-
-            // A tab draws almost zero-width, and letter spacing doesn't apply to it. Show indenting
-            // tabs as an em space, widened to a list level as Obsidian shows them; the text keeps its tab.
-            line.takeWhile { it == ' ' || it == '\t' }.forEachIndexed { k, ch ->
-                if (ch == '\t') {
-                    shown[start + k] = '\u2003'
-                    style(SpanStyle(letterSpacing = 0.8.em), k, k + 1)
-                }
-            }
-
-            val quote = Markdown.QUOTE.find(line)
-            if (quote == null) callout = null
-            when {
-                quote != null -> {
-                    val innerStart = quote.groups[1]!!.range.first.coerceAtMost(line.length)
-                    val gt = line.indexOf('>')
-                    val inner = line.substring(innerStart)
-                    val c = Markdown.CALLOUT.find(inner)
-                    if (c != null) callout = Color(Markdown.calloutColor(c.groupValues[1].lowercase(), p))
-                    // ">" becomes a bar in the quote's (or callout's) colour.
-                    if (!editing(gt, gt + 1)) {
-                        shown[start + gt] = '▎'
-                        style(SpanStyle(color = callout ?: Color(p.quote), fontWeight = FontWeight.Bold), gt, gt + 1)
-                    } else {
-                        markup(0, innerStart)
+        // Tables: a row of cells with a "|---|---|" rule under the first. The rule and the pipes fade,
+        // the header row is bold.
+        if (table || (line.contains('|') && nextIsTableRule)) {
+            if (!line.contains('|')) {
+                table = false
+            } else {
+                when {
+                    TABLE_RULE.matches(line) -> style(faint)
+                    !table -> {
+                        style(SpanStyle(fontWeight = FontWeight.Bold, color = Color(p.headings[0])))
+                        inline(b, line, 0, 0, line.length, on)
                     }
-                    if (c != null) {
-                        val color = callout!!
-                        val typeStart = innerStart + 2
-                        val typeEnd = typeStart + c.groupValues[1].length
-                        val titleStart = innerStart + c.groups[2]!!.range.first
-                        style(SpanStyle(color = color, fontWeight = FontWeight.Bold), innerStart)
-                        if (editing(innerStart, typeEnd + 1)) {
-                            markup(innerStart, titleStart)
-                        } else if (c.groupValues[2].isBlank()) {
-                            // No title: Obsidian shows the type, e.g. "[!note]" reads "Note".
-                            style(hidden, innerStart, typeStart)
-                            shown[start + typeStart] = shown[start + typeStart].uppercaseChar()
-                            style(hidden, typeEnd, line.length)
-                        } else {
-                            style(hidden, innerStart, titleStart)
-                        }
-                    } else {
-                        style(SpanStyle(color = if (callout != null) Color(p.text) else Color(p.muted)), innerStart)
-                        inline(b, line, start, innerStart, line.length, on)
-                    }
+                    else -> inline(b, line, 0, 0, line.length, on)
                 }
-                Markdown.RULE.matches(line) -> {
-                    style(faint)
-                    // "---" is drawn as a line while the cursor is elsewhere.
-                    if (!on) line.forEachIndexed { k, ch -> if (!ch.isWhitespace()) shown[start + k] = '─' }
-                }
-                Markdown.HEADING.matches(line) -> {
-                    val level = line.takeWhile { it == '#' }.length
-                    val textStart = line.indexOfFirst { it != '#' && !it.isWhitespace() }.let { if (it < 0) line.length else it }
-                    style(SpanStyle(
-                        fontSize = (baseSp * p.headingSizes[level - 1]).sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color(p.headings[level - 1]),
-                    ))
-                    markup(0, textStart)
-                    inline(b, line, start, textStart, line.length, on)
-                }
-                Markdown.TASK.matches(line) -> {
-                    val m = Markdown.TASK.find(line)!!
-                    val content = m.groups[3]!!.range.first.coerceAtMost(line.length)
-                    val done = m.groupValues[2] != " "
-                    val marker = m.groups[1]!!.range.last + 1
-                    // "- [ ] " is shown as "☐ ": the box replaces "[", the rest collapses.
-                    val box = line.indexOf('[', marker)
-                    // The cursor at the start of the task's text still shows the box; only inside the marker shows "- [ ]".
-                    if (box >= 0 && !editing(marker, content - 1)) {
-                        shown[start + box] = when (m.groupValues[2]) {
-                            " " -> '☐'
-                            "-" -> '☒'
-                            else -> '☑'
-                        }
-                        style(hidden, marker, box)
-                        style(hidden, box + 1, box + 3)
-                        style(SpanStyle(color = Color(if (done) p.faint else p.checkbox), fontSize = (baseSp * 1.15f).sp), box, box + 1)
-                    } else {
-                        style(SpanStyle(color = Color(if (done) p.faint else p.checkbox), fontFamily = FontFamily.Monospace), marker, content)
-                    }
-                    if (m.groupValues[2] in setOf("x", "X", "-")) {
-                        style(SpanStyle(color = Color(p.faint), textDecoration = TextDecoration.LineThrough), content)
-                    }
-                    inline(b, line, start, content, line.length, on)
-                }
-                Markdown.BULLET.matches(line) || Markdown.NUMBERED.matches(line) -> {
-                    val bullet = Markdown.BULLET.find(line)
-                    val m = bullet ?: Markdown.NUMBERED.find(line)!!
-                    val content = m.groups[m.groupValues.size - 1]!!.range.first.coerceAtMost(line.length)
-                    val marker = m.groups[1]!!.range.last + 1
-                    style(SpanStyle(color = Color(p.marker), fontWeight = FontWeight.Bold), marker, content)
-                    if (bullet != null && !editing(marker, marker + 1)) shown[start + marker] = '•'
-                    inline(b, line, start, content, line.length, on)
-                }
-                else -> inline(b, line, start, 0, line.length, on)
+                line.forEachIndexed { k, ch -> if (ch == '|') style(SpanStyle(color = Color(p.faint)), k, k + 1) }
+                table = true
+                return done()
             }
         }
-        val styled = b.toAnnotatedString()
-        return AnnotatedString(String(shown), styled.spanStyles, styled.paragraphStyles)
+
+        // A tab draws almost zero-width, and letter spacing doesn't apply to it. Show indenting
+        // tabs as an em space, widened to a list level as Obsidian shows them; the text keeps its tab.
+        line.takeWhile { it == ' ' || it == '\t' }.forEachIndexed { k, ch ->
+            if (ch == '\t') {
+                shown[k] = '\u2003'
+                style(SpanStyle(letterSpacing = 0.8.em), k, k + 1)
+            }
+        }
+
+        val quote = Markdown.QUOTE.find(line)
+        if (quote == null) callout = null
+        when {
+            quote != null -> {
+                val innerStart = quote.groups[1]!!.range.first.coerceAtMost(line.length)
+                val gt = line.indexOf('>')
+                val inner = line.substring(innerStart)
+                val c = Markdown.CALLOUT.find(inner)
+                if (c != null) callout = Color(Markdown.calloutColor(c.groupValues[1].lowercase(), p))
+                // ">" becomes a bar in the quote's (or callout's) colour.
+                if (!editing(gt, gt + 1)) {
+                    shown[gt] = '▎'
+                    style(SpanStyle(color = callout ?: Color(p.quote), fontWeight = FontWeight.Bold), gt, gt + 1)
+                } else {
+                    markup(0, innerStart)
+                }
+                if (c != null) {
+                    val color = callout!!
+                    val typeStart = innerStart + 2
+                    val typeEnd = typeStart + c.groupValues[1].length
+                    val titleStart = innerStart + c.groups[2]!!.range.first
+                    style(SpanStyle(color = color, fontWeight = FontWeight.Bold), innerStart)
+                    if (editing(innerStart, typeEnd + 1)) {
+                        markup(innerStart, titleStart)
+                    } else if (c.groupValues[2].isBlank()) {
+                        // No title: Obsidian shows the type, e.g. "[!note]" reads "Note".
+                        style(hidden, innerStart, typeStart)
+                        shown[typeStart] = shown[typeStart].uppercaseChar()
+                        style(hidden, typeEnd, line.length)
+                    } else {
+                        style(hidden, innerStart, titleStart)
+                    }
+                } else {
+                    style(SpanStyle(color = if (callout != null) Color(p.text) else Color(p.muted)), innerStart)
+                    inline(b, line, 0, innerStart, line.length, on)
+                }
+            }
+            Markdown.RULE.matches(line) -> {
+                style(faint)
+                // "---" is drawn as a line while the cursor is elsewhere.
+                if (!on) line.forEachIndexed { k, ch -> if (!ch.isWhitespace()) shown[k] = '─' }
+            }
+            Markdown.HEADING.matches(line) -> {
+                val level = line.takeWhile { it == '#' }.length
+                val textStart = line.indexOfFirst { it != '#' && !it.isWhitespace() }.let { if (it < 0) line.length else it }
+                style(SpanStyle(
+                    fontSize = (baseSp * p.headingSizes[level - 1]).sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(p.headings[level - 1]),
+                ))
+                markup(0, textStart)
+                inline(b, line, 0, textStart, line.length, on)
+            }
+            Markdown.TASK.matches(line) -> {
+                val m = Markdown.TASK.find(line)!!
+                val content = m.groups[3]!!.range.first.coerceAtMost(line.length)
+                val isDone = m.groupValues[2] != " "
+                val marker = m.groups[1]!!.range.last + 1
+                // "- [ ] " is shown as "☐ ": the box replaces "[", the rest collapses.
+                val box = line.indexOf('[', marker)
+                // The cursor at the start of the task's text still shows the box; only inside the marker shows "- [ ]".
+                if (box >= 0 && !editing(marker, content - 1)) {
+                    shown[box] = when (m.groupValues[2]) {
+                        " " -> '☐'
+                        "-" -> '☒'
+                        else -> '☑'
+                    }
+                    style(hidden, marker, box)
+                    style(hidden, box + 1, box + 3)
+                    style(SpanStyle(color = Color(if (isDone) p.faint else p.checkbox), fontSize = (baseSp * 1.15f).sp), box, box + 1)
+                } else {
+                    style(SpanStyle(color = Color(if (isDone) p.faint else p.checkbox), fontFamily = FontFamily.Monospace), marker, content)
+                }
+                if (m.groupValues[2] in setOf("x", "X", "-")) {
+                    style(SpanStyle(color = Color(p.faint), textDecoration = TextDecoration.LineThrough), content)
+                }
+                inline(b, line, 0, content, line.length, on)
+            }
+            Markdown.BULLET.matches(line) || Markdown.NUMBERED.matches(line) -> {
+                val bullet = Markdown.BULLET.find(line)
+                val m = bullet ?: Markdown.NUMBERED.find(line)!!
+                val content = m.groups[m.groupValues.size - 1]!!.range.first.coerceAtMost(line.length)
+                val marker = m.groups[1]!!.range.last + 1
+                style(SpanStyle(color = Color(p.marker), fontWeight = FontWeight.Bold), marker, content)
+                if (bullet != null && !editing(marker, marker + 1)) shown[marker] = '•'
+                inline(b, line, 0, content, line.length, on)
+            }
+            else -> inline(b, line, 0, 0, line.length, on)
+        }
+        return done()
     }
 
     /** Styles bold, links, tags and the rest within [from, to) of [line], which starts at [base] in the text. */
@@ -229,6 +283,14 @@ class LivePreview(
     }
 
     companion object {
+        /** Styled lines kept for reuse; old ones drop off once there are this many. */
+        private val cache = object : LinkedHashMap<Key, Styled>(1024, 0.75f, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Key, Styled>?) = size > 5000
+        }
+
+        /** The rule under a table's header: "|---|:---:|", pipes at the ends optional. */
+        val TABLE_RULE = Regex("^\\s*\\|?\\s*:?-+:?\\s*(\\|\\s*:?-+:?\\s*)*\\|?\\s*$")
+
         private val LIST_PREFIX = Regex("^((?:[ \\t]*>[ \\t]?)*)([ \\t]*)([-*+] \\[.] |[-*+] |(\\d+)([.)]) )?")
 
         /**

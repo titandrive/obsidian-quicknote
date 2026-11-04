@@ -44,5 +44,6 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.10.0")
     implementation("androidx.core:core-ktx:1.17.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
+    implementation("androidx.work:work-runtime-ktx:2.11.2")
     implementation("androidx.profileinstaller:profileinstaller:1.4.1")
 }

@@ -2,6 +2,7 @@ package local.obsidianwidget
 
 import android.graphics.Color
 import android.graphics.Typeface
+import android.text.Layout
 import android.text.SpannableStringBuilder
 import android.text.Spanned
 import android.text.style.BackgroundColorSpan
@@ -23,7 +24,12 @@ class Block(
     val task: Boolean = false,
     val code: Boolean = false,
     val rule: Boolean = false,
+    /** A table: rows of styled cells, the header first. [text] then holds a plain fallback. */
+    val table: Table? = null,
 )
+
+/** A markdown table: [rows] of cells (the first is the header), and each column's alignment. */
+class Table(val rows: List<List<CharSequence>>, val align: List<Layout.Alignment>)
 
 /**
  * Turns Obsidian-flavoured markdown into styled rows for a widget. Only uses framework spans,
@@ -94,6 +100,34 @@ object Markdown {
                 calloutColor = null
                 out.add(Block(spacer(), i))
                 i++
+                continue
+            }
+
+            // A table: a row of cells with a "|---|---|" rule under it, then rows until one has no pipe.
+            if (line.contains('|') && lines.getOrNull(i + 1)?.let { LivePreview.TABLE_RULE.matches(it) } == true) {
+                val start = i
+                val ruleCells = cells(lines[i + 1])
+                val align = ruleCells.map { c ->
+                    val t = c.trim()
+                    when {
+                        t.startsWith(":") && t.endsWith(":") -> Layout.Alignment.ALIGN_CENTER
+                        t.endsWith(":") -> Layout.Alignment.ALIGN_OPPOSITE
+                        else -> Layout.Alignment.ALIGN_NORMAL
+                    }
+                }
+                val raw = mutableListOf(cells(line))
+                i += 2
+                while (i < lines.size && lines[i].contains('|') && lines[i].isNotBlank()) raw.add(cells(lines[i++]))
+                val columns = raw.maxOf { it.size }
+                val rows = raw.mapIndexed { r, row ->
+                    List(columns) { c ->
+                        val cell = inline(row.getOrNull(c).orEmpty().trim(), p)
+                        if (r == 0) span(cell, 0, StyleSpan(Typeface.BOLD), ForegroundColorSpan(p.headings[0]))
+                        cell
+                    }
+                }
+                val fallback = rows.joinToString("\n") { it.joinToString("  ·  ") }
+                out.add(Block(fallback, start, table = Table(rows, List(columns) { align.getOrElse(it) { Layout.Alignment.ALIGN_NORMAL } })))
                 continue
             }
 
@@ -223,6 +257,10 @@ object Markdown {
         out.append(s, last, s.length)
         return out
     }
+
+    /** A table row's cells: split on pipes that aren't escaped, without the ones at the ends. */
+    private fun cells(row: String): List<String> =
+        row.trim().removePrefix("|").removeSuffix("|").split(Regex("(?<!\\\\)\\|"))
 
     /** Flips the checkbox on [line] of [src]; returns null if that line isn't a task any more. */
     fun toggleTask(src: String, line: Int): String? {

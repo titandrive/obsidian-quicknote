@@ -23,16 +23,25 @@ data class WidgetConfig(
     val uri: Uri get() = Uri.parse(noteUri)
     val title: String get() = notePath.substringAfterLast('/').removeSuffix(".md")
 
-    fun isDark(ctx: Context): Boolean = when (if (mode == "vault") colors?.vaultMode ?: "system" else mode) {
+    /** "dark", "light" or "system", with "like the vault" worked out. */
+    val effectiveMode: String get() = if (mode == "vault") colors?.vaultMode ?: "system" else mode
+
+    /**
+     * Follows the phone's dark mode. On Android 12+ the widget then carries both looks and the
+     * launcher switches between them itself, the moment dark mode changes.
+     */
+    val followsSystem: Boolean get() = effectiveMode == "system"
+
+    fun palette(ctx: Context, dark: Boolean): Palette =
+        (if (dark) colors?.dark else colors?.light) ?: if (dark) Palette.FALLBACK_DARK else Palette.FALLBACK_LIGHT
+
+    fun isDark(ctx: Context): Boolean = when (effectiveMode) {
         "dark" -> true
         "light" -> false
         else -> ctx.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
     }
 
-    fun palette(ctx: Context): Palette {
-        val dark = isDark(ctx)
-        return (if (dark) colors?.dark else colors?.light) ?: if (dark) Palette.FALLBACK_DARK else Palette.FALLBACK_LIGHT
-    }
+    fun palette(ctx: Context): Palette = palette(ctx, isDark(ctx))
 
     fun toJson(): JSONObject = JSONObject()
         .put("noteUri", noteUri).put("notePath", notePath).put("theme", theme).put("mode", mode)

@@ -13,7 +13,7 @@ import kotlin.concurrent.thread
 class NoteWidgetProvider : AppWidgetProvider() {
 
     override fun onUpdate(ctx: Context, mgr: AppWidgetManager, ids: IntArray) {
-        // Runs every 30 minutes and after the app is updated; picks up note, theme and font changes made in Obsidian.
+        // Runs when a widget is added and after the app is updated; regular checks are ChangeCheck's.
         refresh(ctx, ids)
     }
 
@@ -33,13 +33,21 @@ class NoteWidgetProvider : AppWidgetProvider() {
         for (id in ids) {
             WidgetStore.delete(ctx, id)
             NoteRows.forget(ctx, id)
+            ChangeCheck.forget(ctx, id)
         }
     }
+
+    override fun onEnabled(ctx: Context) = ChangeCheck.schedule(ctx)
+
+    override fun onDisabled(ctx: Context) = ChangeCheck.schedule(ctx)
 
     override fun onReceive(ctx: Context, intent: Intent) {
         when (intent.action) {
             ACTION_REFRESH -> refresh(ctx, intArrayOf(intent.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, AppWidgetManager.INVALID_APPWIDGET_ID)), spin = true)
-            Intent.ACTION_MY_PACKAGE_REPLACED -> refresh(ctx, allIds(ctx))
+            Intent.ACTION_MY_PACKAGE_REPLACED -> {
+                ChangeCheck.schedule(ctx)
+                refresh(ctx, allIds(ctx))
+            }
             else -> super.onReceive(ctx, intent)
         }
     }
@@ -77,15 +85,40 @@ class NoteWidgetProvider : AppWidgetProvider() {
 
         /** Swaps the refresh button for its spinning version, or back. */
         private fun spinner(ctx: Context, id: Int, on: Boolean) = RemoteViews(ctx.packageName, R.layout.widget_note).also {
-            applySpinner(ctx, it, WidgetStore.load(ctx, id)?.palette(ctx) ?: Palette.FALLBACK_DARK, on)
+            applySpinner(it, looks(ctx, WidgetStore.load(ctx, id)), on)
         }
 
-        private fun applySpinner(ctx: Context, views: RemoteViews, p: Palette, on: Boolean) {
+        /**
+         * The palettes a widget is drawn in: [day] always, and [night] too when it follows the
+         * phone's dark mode on Android 12+, for the launcher to switch to by itself.
+         */
+        private class Looks(val day: Palette, val night: Palette?)
+
+        private fun looks(ctx: Context, cfg: WidgetConfig?): Looks = when {
+            cfg == null -> Looks(Palette.FALLBACK_DARK, null)
+            NoteRows.dayAndNight(cfg) -> Looks(cfg.palette(ctx, false), cfg.palette(ctx, true))
+            else -> Looks(cfg.palette(ctx), null)
+        }
+
+        /** Calls [method] with a colour, or with a light and a dark one for the launcher to pick from. */
+        private fun color(views: RemoteViews, viewId: Int, method: String, looks: Looks, pick: (Palette) -> Int) {
+            val night = looks.night
+            if (night != null && android.os.Build.VERSION.SDK_INT >= 31) views.setColorInt(viewId, method, pick(looks.day), pick(night))
+            else views.setInt(viewId, method, pick(looks.day))
+        }
+
+        private fun colorList(views: RemoteViews, viewId: Int, method: String, looks: Looks, pick: (Palette) -> Int) {
+            if (android.os.Build.VERSION.SDK_INT < 31) return
+            val day = android.content.res.ColorStateList.valueOf(pick(looks.day))
+            val night = looks.night
+            if (night != null) views.setColorStateList(viewId, method, day, android.content.res.ColorStateList.valueOf(pick(night)))
+            else views.setColorStateList(viewId, method, day)
+        }
+
+        private fun applySpinner(views: RemoteViews, looks: Looks, on: Boolean) {
             views.setViewVisibility(R.id.btn_refresh, if (on) android.view.View.GONE else android.view.View.VISIBLE)
             views.setViewVisibility(R.id.refresh_spin, if (on) android.view.View.VISIBLE else android.view.View.GONE)
-            if (android.os.Build.VERSION.SDK_INT >= 31) {
-                views.setColorStateList(R.id.refresh_spin, "setIndeterminateTintList", android.content.res.ColorStateList.valueOf(p.muted))
-            }
+            colorList(views, R.id.refresh_spin, "setIndeterminateTintList", looks) { it.muted }
         }
 
         /**
@@ -98,16 +131,17 @@ class NoteWidgetProvider : AppWidgetProvider() {
         fun update(ctx: Context, mgr: AppWidgetManager, id: Int) {
             val cfg = WidgetStore.load(ctx, id)
             val views = RemoteViews(ctx.packageName, R.layout.widget_note)
-            val p = cfg?.palette(ctx) ?: Palette.FALLBACK_DARK
+            val looks = looks(ctx, cfg)
+            val p = looks.day
 
-            views.setInt(R.id.bg, "setColorFilter", p.background)
+            color(views, R.id.bg, "setColorFilter", looks) { it.background }
             views.setInt(R.id.bg, "setImageAlpha", ((cfg?.opacity ?: 100) * 255 / 100))
-            views.setTextColor(R.id.empty, p.faint)
+            if (looks.night != null) colorList(views, R.id.empty, "setTextColor", looks) { it.faint } else views.setTextColor(R.id.empty, p.faint)
             for (button in listOf(R.id.btn_refresh, R.id.btn_edit, R.id.btn_open, R.id.btn_settings)) {
-                views.setInt(button, "setColorFilter", p.muted)
+                color(views, button, "setColorFilter", looks) { it.muted }
             }
             // A launcher may reapply this onto the existing views, so set the still icon back explicitly.
-            applySpinner(ctx, views, p, false)
+            applySpinner(views, looks, false)
 
             if (cfg == null) {
                 views.setImageViewBitmap(R.id.title, title(ctx, id, null, ctx.getString(R.string.app_name), p))
@@ -123,17 +157,26 @@ class NoteWidgetProvider : AppWidgetProvider() {
             views.setViewVisibility(R.id.header, if (cfg.showHeader) android.view.View.VISIBLE else android.view.View.GONE)
             // Without the header the list starts at the top edge; give it the header's top padding back.
             views.setViewPadding(R.id.list, 0, if (cfg.showHeader) 0 else dp(ctx, 6), 0, 0)
-            views.setImageViewBitmap(R.id.title, title(ctx, id, cfg, cfg.title, p))
+            val night = looks.night
+            if (night != null && android.os.Build.VERSION.SDK_INT >= 31) {
+                views.setIcon(
+                    R.id.title, "setImageIcon",
+                    android.graphics.drawable.Icon.createWithBitmap(title(ctx, id, cfg, cfg.title, p)),
+                    android.graphics.drawable.Icon.createWithBitmap(title(ctx, id, cfg, cfg.title, night)),
+                )
+            } else {
+                views.setImageViewBitmap(R.id.title, title(ctx, id, cfg, cfg.title, p))
+            }
             views.setContentDescription(R.id.title, cfg.title)
             views.setTextViewText(R.id.empty, ctx.getString(R.string.empty_note))
 
             // On Android 12+ every row goes with the widget, so the launcher never fetches rows while
             // scrolling (fetching showed placeholders that jumped to the real rows' heights).
             val rows = if (android.os.Build.VERSION.SDK_INT >= 31) NoteRows.build(ctx, id) else null
-            val inline = rows != null && rows.first.sumOf { it.image.size } < INLINE_LIMIT
+            val inline = rows != null && rows.rows.sumOf { it.image.size } + rows.night.orEmpty().sumOf { it.image.size } < INLINE_LIMIT
             if (inline && android.os.Build.VERSION.SDK_INT >= 31) {
                 val items = RemoteViews.RemoteCollectionItems.Builder().setHasStableIds(true).setViewTypeCount(1)
-                rows!!.first.forEachIndexed { i, row -> items.addItem(i.toLong(), NoteRows.view(ctx, row)) }
+                rows!!.rows.forEachIndexed { i, row -> items.addItem(i.toLong(), NoteRows.view(ctx, row, rows.night?.getOrNull(i))) }
                 views.setRemoteAdapter(R.id.list, items.build())
             } else {
                 val service = Intent(ctx, NoteListService::class.java)
@@ -170,6 +213,7 @@ class NoteWidgetProvider : AppWidgetProvider() {
             views.setOnClickPendingIntent(R.id.btn_refresh, activity(ctx, id, 6, tapIntent(ctx, id, "refresh").putExtra(TapActivity.EXTRA_REFRESH, true)))
             mgr.updateAppWidget(id, views)
             if (!inline) mgr.notifyAppWidgetViewDataChanged(id, R.id.list)
+            ChangeCheck.drawn(ctx, id, cfg)
         }
 
         private fun dp(ctx: Context, v: Int) = (v * ctx.resources.displayMetrics.density).toInt()

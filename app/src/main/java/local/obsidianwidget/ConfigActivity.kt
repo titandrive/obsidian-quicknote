@@ -100,6 +100,7 @@ class ConfigActivity : ComponentActivity() {
         val full = if (cfg.colors != null) cfg
         else cfg.copy(colors = withContext(Dispatchers.IO) { ObsidianTheme.load(this@ConfigActivity, cfg.theme) })
         WidgetStore.save(this, widgetId, full)
+        ChangeCheck.schedule(this)
         withContext(Dispatchers.IO) { NoteWidgetProvider.update(this@ConfigActivity, AppWidgetManager.getInstance(this@ConfigActivity), widgetId) }
         setResult(Activity.RESULT_OK, Intent().putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, widgetId))
         finish()
@@ -279,6 +280,21 @@ class ConfigActivity : ComponentActivity() {
                             SettingLabel("Text size", value = "${textSize.toInt()}")
                             StepSlider(textSize.toInt(), 10..19, step = 1) { textSize = it.toFloat() }
                             SwitchRow("Show header", null, showHeader) { showHeader = it }
+                        }
+
+                        SectionCard("Updates", R.drawable.ic_refresh) {
+                            var check by remember { mutableIntStateOf(ChangeCheck.minutes(this@ConfigActivity)) }
+                            SettingLabel("Check for changes", "Picks up edits made in Obsidian, for all widgets")
+                            PillSegmented(ChangeCheck.CHOICES, check, {
+                                when (it) {
+                                    0 -> "Off"
+                                    in 1..59 -> "${it}m"
+                                    else -> "${it / 60}h"
+                                }
+                            }) {
+                                check = it
+                                ChangeCheck.setMinutes(this@ConfigActivity, it)
+                            }
                         }
 
                         Spacer(Modifier.height(8.dp))

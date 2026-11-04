@@ -4,6 +4,7 @@
     <application>
         <!-- Debug builds only: adb shell am broadcast -n local.obsidianwidget/.ThemeProbe -->
         <receiver android:name=".ThemeProbe" android:exported="true" />
+        <receiver android:name=".RenderProbe" android:exported="true" />
         <!-- Debug builds only, so the editor can be opened and checked from adb. -->
         <activity android:name=".EditorActivity" android:exported="true" tools:replace="android:exported" />
         <activity android:name=".TapActivity" android:exported="true" tools:replace="android:exported" />
