@@ -23,10 +23,27 @@ android {
             // Sideload-only: sign release builds with the debug key so the APK installs.
             signingConfig = signingConfigs.getByName("debug")
         }
+        // As in Paid to Poop: release speed for everyday use on the phone (not debuggable, so
+        // Compose runs optimized), signed with the debug key so it installs over the debug build
+        // and keeps its data. Install with ./gradlew installFast.
+        create("fast") {
+            initWith(getByName("release"))
+            signingConfig = signingConfigs.getByName("debug")
+            matchingFallbacks += listOf("release")
+        }
     }
 
     buildFeatures {
         compose = true
+    }
+
+    // Keeps resource IDs the same from build to build, pinned to those of an installed build. A
+    // launcher keeps showing a widget's last saved layout after an app update until the app
+    // redraws it; if the IDs had moved, that layout no longer fits and the widget goes blank.
+    // New resources get IDs of their own; to pin them too, regenerate stable-ids.txt from a new
+    // APK with "aapt2 dump resources" (one "local.obsidianwidget:type/name = 0x7f..." per line).
+    androidResources {
+        additionalParameters += listOf("--stable-ids", file("stable-ids.txt").path)
     }
 
     compileOptions {
