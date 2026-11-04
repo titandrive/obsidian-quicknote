@@ -174,7 +174,8 @@ class EditorActivity : ComponentActivity() {
         val noRipple = remember { MutableInteractionSource() }
         // Restyled whenever the cursor moves to another line, so that line's markup shows.
         val active = LivePreview.activeLines(value.text, value.selection.start, value.selection.end)
-        val preview = remember(active) { LivePreview(p, cfg.textSize, active) }
+        val cursor = value.selection.start
+        val preview = remember(active, cursor) { LivePreview(p, cfg.textSize, active, cursor) }
 
         Box(
             Modifier

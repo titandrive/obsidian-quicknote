@@ -132,7 +132,7 @@ object Markdown {
                         val m = TASK.find(line)!!
                         val mark = m.groupValues[2]
                         val done = mark != " "
-                        val sb = SpannableStringBuilder(if (done) "☑ " else "☐ ")
+                        val sb = SpannableStringBuilder(when (mark) { " " -> "☐ "; "-" -> "☒ "; else -> "☑ " })
                         span(sb, 0, ForegroundColorSpan(if (done) p.faint else p.checkbox))
                         val boxEnd = sb.length
                         sb.append(inline(m.groupValues[3], p))
