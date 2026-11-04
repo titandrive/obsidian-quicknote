@@ -18,8 +18,7 @@ class NoteWidgetProvider : AppWidgetProvider() {
     }
 
     override fun onAppWidgetOptionsChanged(ctx: Context, mgr: AppWidgetManager, id: Int, options: android.os.Bundle) {
-        // Resized: forget the measured size and redraw the rows at the new width.
-        WidgetStore.clearRect(ctx, id)
+        // Resized: redraw the rows at the new width.
         update(ctx, mgr, id)
         mgr.notifyAppWidgetViewDataChanged(id, R.id.list)
     }
@@ -98,9 +97,9 @@ class NoteWidgetProvider : AppWidgetProvider() {
             )
             views.setPendingIntentTemplate(R.id.list, rowTemplate)
 
-            // Mutable so the launcher can fill in where on screen the tap was; the editor lines itself up with that.
-            views.setOnClickPendingIntent(R.id.btn_edit, editTap(ctx, id, 2, EditorActivity.SOURCE_BUTTON))
-            views.setOnClickPendingIntent(R.id.empty, editTap(ctx, id, 7, EditorActivity.SOURCE_LIST))
+            val edit = activity(ctx, id, 2, editorIntent(ctx, id))
+            views.setOnClickPendingIntent(R.id.btn_edit, edit)
+            views.setOnClickPendingIntent(R.id.empty, edit)
             views.setOnClickPendingIntent(R.id.btn_change, activity(ctx, id, 3, configIntent(ctx, id, pickOnly = true)))
             views.setOnClickPendingIntent(R.id.title, activity(ctx, id, 4, configIntent(ctx, id, pickOnly = false)))
             views.setOnClickPendingIntent(
@@ -147,11 +146,6 @@ class NoteWidgetProvider : AppWidgetProvider() {
             .putExtra(ConfigActivity.EXTRA_PICK_ONLY, pickOnly)
             .setData(Uri.parse("widget://$id/config/$pickOnly"))
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-
-        private fun editTap(ctx: Context, id: Int, slot: Int, source: String) = PendingIntent.getActivity(
-            ctx, id * 10 + slot, editorIntent(ctx, id).putExtra(EditorActivity.EXTRA_SOURCE, source),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE,
-        )
 
         private fun activity(ctx: Context, id: Int, slot: Int, intent: Intent) = PendingIntent.getActivity(
             ctx, id * 10 + slot, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,

@@ -66,9 +66,8 @@ object TextBitmaps {
         return bmp
     }
 
-    /** The widget's width on screen in pixels: measured by the editor if it has been opened, else what the launcher reports. */
+    /** The widget's width on screen in pixels, as the launcher reports it. */
     fun widgetWidth(ctx: Context, id: Int): Int {
-        WidgetStore.loadRect(ctx, id)?.let { if (it.width() > 0) return it.width() }
         val opts = AppWidgetManager.getInstance(ctx).getAppWidgetOptions(id)
         val portrait = ctx.resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT
         val dp = opts.getInt(if (portrait) AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH else AppWidgetManager.OPTION_APPWIDGET_MAX_WIDTH)

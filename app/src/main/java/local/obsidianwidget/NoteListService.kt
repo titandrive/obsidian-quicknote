@@ -59,8 +59,7 @@ class NoteListService : RemoteViewsService() {
                 }
                 setOnClickFillInIntent(
                     R.id.item,
-                    Intent().putExtra(EditorActivity.EXTRA_LINE, b.line).putExtra(EditorActivity.EXTRA_TOGGLE, b.task)
-                        .putExtra(EditorActivity.EXTRA_SOURCE, EditorActivity.SOURCE_ROW),
+                    Intent().putExtra(EditorActivity.EXTRA_LINE, b.line).putExtra(EditorActivity.EXTRA_TOGGLE, b.task),
                 )
             }
         }

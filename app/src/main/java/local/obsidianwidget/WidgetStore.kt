@@ -2,7 +2,6 @@ package local.obsidianwidget
 
 import android.content.Context
 import android.content.res.Configuration
-import android.graphics.Rect
 import android.net.Uri
 import org.json.JSONObject
 
@@ -65,17 +64,6 @@ object WidgetStore {
     }
 
     fun delete(ctx: Context, id: Int) {
-        prefs(ctx).edit().remove("w$id").remove("rect$id").apply()
-    }
-
-    /** Where the widget was last seen on screen, so the editor can sit exactly on top of it. */
-    fun loadRect(ctx: Context, id: Int): Rect? = prefs(ctx).getString("rect$id", null)?.let(Rect::unflattenFromString)
-
-    fun clearRect(ctx: Context, id: Int) {
-        prefs(ctx).edit().remove("rect$id").apply()
-    }
-
-    fun saveRect(ctx: Context, id: Int, rect: Rect) {
-        prefs(ctx).edit().putString("rect$id", rect.flattenToString()).apply()
+        prefs(ctx).edit().remove("w$id").apply()
     }
 }
