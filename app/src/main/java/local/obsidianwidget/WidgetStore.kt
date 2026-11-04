@@ -14,6 +14,8 @@ data class WidgetConfig(
     val opacity: Int = 100,
     val textSize: Float = 14f,
     val colors: ThemeColors? = null,
+    /** Whether the widget shows its title and buttons above the note. */
+    val showHeader: Boolean = true,
 ) {
     /** The vault's font, copied into app storage, or null for the system font. */
     val fontFile: String? get() = colors?.font?.takeIf { it.isNotEmpty() }
@@ -34,7 +36,7 @@ data class WidgetConfig(
 
     fun toJson(): JSONObject = JSONObject()
         .put("noteUri", noteUri).put("notePath", notePath).put("theme", theme).put("mode", mode)
-        .put("opacity", opacity).put("textSize", textSize.toDouble())
+        .put("opacity", opacity).put("textSize", textSize.toDouble()).put("showHeader", showHeader)
         .apply {
             colors?.let {
                 put("dark", it.dark.toJson()).put("light", it.light.toJson()).put("vaultMode", it.vaultMode).put("vaultFont", it.font)
@@ -49,6 +51,7 @@ data class WidgetConfig(
                 Palette.fromJson(o.getJSONObject("dark")), Palette.fromJson(o.getJSONObject("light")), o.optString("vaultMode", "system"),
                 o.optString("vaultFont"),
             ) else null,
+            o.optBoolean("showHeader", true),
         )
     }
 }

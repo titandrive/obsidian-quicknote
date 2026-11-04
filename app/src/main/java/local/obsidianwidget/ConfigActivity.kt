@@ -116,6 +116,7 @@ class ConfigActivity : ComponentActivity() {
         var mode by remember { mutableStateOf(existing?.mode ?: "vault") }
         var opacity by remember { mutableIntStateOf(existing?.opacity ?: 100) }
         var textSize by remember { mutableStateOf(existing?.textSize ?: 14f) }
+        var showHeader by remember { mutableStateOf(existing?.showHeader ?: true) }
         var colors by remember { mutableStateOf(existing?.colors) }
         var noteText by remember { mutableStateOf<String?>(null) }
         var picking by remember { mutableStateOf(pickOnly) }
@@ -155,7 +156,7 @@ class ConfigActivity : ComponentActivity() {
             noteText = noteUri?.let { u -> withContext(Dispatchers.IO) { Vault.read(this@ConfigActivity, android.net.Uri.parse(u)) } }
         }
 
-        fun current() = WidgetConfig(noteUri.orEmpty(), notePath.orEmpty(), theme, mode, opacity, textSize, colors)
+        fun current() = WidgetConfig(noteUri.orEmpty(), notePath.orEmpty(), theme, mode, opacity, textSize, colors, showHeader)
         val cfg = current()
 
         // The screen wears the widget's own theme and font, so changes show on it as they're made.
@@ -255,6 +256,12 @@ class ConfigActivity : ComponentActivity() {
                         PillSegmented(OPACITIES, opacity, { "$it%" }) { opacity = it }
                         SettingLabel("Text size")
                         PillSegmented(TEXT_SIZES, textSize, { "${it.toInt()}" }) { textSize = it }
+                        SwitchRow(
+                            "Show title and buttons",
+                            if (showHeader) "The note's name and buttons above it"
+                            else "Just the note. Tap a line to edit; long-press the widget for settings",
+                            showHeader,
+                        ) { showHeader = it }
                     }
 
                     Spacer(Modifier.height(8.dp))
@@ -301,7 +308,7 @@ class ConfigActivity : ComponentActivity() {
                     .padding(start = 14.dp, end = 8.dp, top = 6.dp, bottom = 12.dp)
                     .heightIn(max = 230.dp),
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.height(34.dp)) {
+                if (cfg.showHeader) Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.height(34.dp)) {
                     Text(
                         cfg.title.ifEmpty { "Note" }, color = Color(p.title), fontWeight = FontWeight.Bold, fontSize = 15.sp,
                         fontFamily = Fonts.compose(cfg.fontFile), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),

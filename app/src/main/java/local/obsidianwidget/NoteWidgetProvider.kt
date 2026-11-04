@@ -94,6 +94,9 @@ class NoteWidgetProvider : AppWidgetProvider() {
                 return
             }
 
+            views.setViewVisibility(R.id.header, if (cfg.showHeader) android.view.View.VISIBLE else android.view.View.GONE)
+            // Without the header the list starts at the top edge; give it the header's top padding back.
+            views.setViewPadding(R.id.list, 0, if (cfg.showHeader) 0 else dp(ctx, 6), 0, 0)
             views.setImageViewBitmap(R.id.title, title(ctx, id, cfg, cfg.title, p))
             views.setContentDescription(R.id.title, cfg.title)
             views.setTextViewText(R.id.empty, ctx.getString(R.string.empty_note))
@@ -147,6 +150,8 @@ class NoteWidgetProvider : AppWidgetProvider() {
             mgr.updateAppWidget(id, views)
             if (!inline) mgr.notifyAppWidgetViewDataChanged(id, R.id.list)
         }
+
+        private fun dp(ctx: Context, v: Int) = (v * ctx.resources.displayMetrics.density).toInt()
 
         private fun title(ctx: Context, id: Int, cfg: WidgetConfig?, text: String, p: Palette): android.graphics.Bitmap {
             val bold = android.graphics.Typeface.create(Fonts.typeface(cfg?.fontFile), android.graphics.Typeface.BOLD)
