@@ -201,13 +201,14 @@ class EditorActivity : ComponentActivity() {
                 .clickable(interactionSource = noRipple, indication = null) { done() }
                 .systemBarsPadding()
                 .imePadding()
-                .padding(12.dp),
+                .padding(8.dp),
             contentAlignment = Alignment.Center,
         ) {
             Column(
                 Modifier
                     .fillMaxWidth()
-                    .fillMaxHeight(0.85f)
+                    // All the room between the status bar and the keyboard.
+                    .fillMaxHeight()
                     .clip(RoundedCornerShape(20.dp))
                     .background(bg)
                     // Swallow taps on the card so they don't count as tapping outside it.
