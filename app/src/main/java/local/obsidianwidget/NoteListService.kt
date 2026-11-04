@@ -4,18 +4,24 @@ import android.appwidget.AppWidgetManager
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
+import android.graphics.drawable.Icon
 import android.util.TypedValue
 import android.view.View
 import android.widget.RemoteViews
 import android.widget.RemoteViewsService
+import java.io.ByteArrayOutputStream
 
 /** Feeds the widget's scrolling list with the rendered rows of its note. */
 class NoteListService : RemoteViewsService() {
     override fun onGetViewFactory(intent: Intent): RemoteViewsFactory =
         Factory(applicationContext, intent.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, 0))
 
-    /** One strip of a block; a tall block is several, and only the first and last get the code block's padding. */
-    private class Row(val block: Block, val image: Bitmap?, val first: Boolean, val last: Boolean)
+    /**
+     * One strip of a block; a tall block is several, and only the first and last get the code block's padding.
+     * [png] is the strip as a compressed image: the launcher caches only ~2 MB of rows, which raw bitmaps
+     * of text fill in about ten rows, so fast scrolling kept refetching them and the list jumped.
+     */
+    private class Row(val block: Block, val png: ByteArray?, val first: Boolean, val last: Boolean)
 
     private class Factory(val ctx: Context, val id: Int) : RemoteViewsFactory {
         private var rows: List<Row> = emptyList()
@@ -37,7 +43,7 @@ class NoteListService : RemoteViewsService() {
             rows = blocks.flatMap { b ->
                 if (b.rule) return@flatMap listOf(Row(b, null, true, true))
                 val strips = TextBitmaps.block(ctx, b.text, width - if (b.code) dp(16) else 0, paint)
-                strips.mapIndexed { i, bmp -> Row(b, bmp, i == 0, i == strips.lastIndex) }
+                strips.mapIndexed { i, bmp -> Row(b, png(bmp), i == 0, i == strips.lastIndex) }
             }
         }
 
@@ -48,8 +54,8 @@ class NoteListService : RemoteViewsService() {
                 setViewVisibility(R.id.item_img, if (b.rule) View.GONE else View.VISIBLE)
                 setViewVisibility(R.id.item_rule, if (b.rule) View.VISIBLE else View.GONE)
                 setInt(R.id.item_rule, "setBackgroundColor", palette.faint)
-                row.image?.let {
-                    setImageViewBitmap(R.id.item_img, it)
+                row.png?.let {
+                    setImageViewIcon(R.id.item_img, Icon.createWithData(it, 0, it.size))
                     if (row.first) setContentDescription(R.id.item_img, b.text)
                     val side = if (b.code) dp(8) else 0
                     val top = if (b.code && row.first) dp(6) else 0
@@ -64,13 +70,20 @@ class NoteListService : RemoteViewsService() {
             }
         }
 
+        private fun png(bmp: Bitmap): ByteArray = ByteArrayOutputStream().use { out ->
+            bmp.compress(Bitmap.CompressFormat.PNG, 100, out)
+            bmp.recycle()
+            out.toByteArray()
+        }
+
         private fun dp(v: Int) = (v * ctx.resources.displayMetrics.density).toInt()
 
         override fun getCount() = rows.size
         override fun getLoadingView(): RemoteViews? = null
         override fun getViewTypeCount() = 1
         override fun getItemId(position: Int) = position.toLong()
-        override fun hasStableIds() = false
+        // Rows only change when the note does, which resets the whole list.
+        override fun hasStableIds() = true
         override fun onCreate() = Unit
         override fun onDestroy() = Unit
     }
