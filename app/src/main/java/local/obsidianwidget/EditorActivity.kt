@@ -63,10 +63,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.concurrent.thread
 
-/**
- * A card that floats over the home screen for editing the widget's note as plain markdown.
- * Also handles ticking off a task row, which it does without showing anything.
- */
+/** A card that floats over the wallpaper for editing the widget's note, styled as it's typed. */
 class EditorActivity : ComponentActivity() {
     companion object {
         const val EXTRA_LINE = "line"
@@ -96,16 +93,6 @@ class EditorActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         val id = intent.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, AppWidgetManager.INVALID_APPWIDGET_ID)
         cfg = WidgetStore.load(this, id) ?: return finish()
-
-        if (intent.getBooleanExtra(EXTRA_TOGGLE, false)) {
-            val line = intent.getIntExtra(EXTRA_LINE, -1)
-            val app = applicationContext
-            thread { toggleTask(app, cfg, line) }
-            finish()
-            @Suppress("DEPRECATION")
-            overridePendingTransition(0, 0)
-            return
-        }
 
         enableEdgeToEdge()
         val line = intent.getIntExtra(EXTRA_LINE, -1)

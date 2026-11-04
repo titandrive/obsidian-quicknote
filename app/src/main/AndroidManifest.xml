@@ -44,7 +44,16 @@
             android:excludeFromRecents="true"
             android:launchMode="singleTask"
             android:windowSoftInputMode="adjustResize"
-            android:theme="@style/Theme.ObsidianWidget.Overlay" />
+            android:theme="@style/Theme.ObsidianWidget.Editor" />
+
+        <!-- Takes taps on the widget's lines: ticks a task without showing anything, or opens the editor. -->
+        <activity
+            android:name=".RowTapActivity"
+            android:exported="false"
+            android:taskAffinity=""
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:theme="@android:style/Theme.NoDisplay" />
 
         <receiver
             android:name=".NoteWidgetProvider"

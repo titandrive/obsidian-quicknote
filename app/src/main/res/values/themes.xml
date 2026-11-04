@@ -3,8 +3,13 @@
         <item name="android:windowBackground">@android:color/black</item>
     </style>
 
-    <style name="Theme.ObsidianWidget.Overlay" parent="android:Theme.Translucent.NoTitleBar">
+    <!--
+        The editor: an opaque window that shows the wallpaper behind its card. A see-through window
+        would leave the launcher counting as visible, so pressing Home jumped it to its first page.
+    -->
+    <style name="Theme.ObsidianWidget.Editor" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowShowWallpaper">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
         <item name="android:windowAnimationStyle">@android:style/Animation.Dialog</item>
-        <item name="android:windowNoTitle">true</item>
     </style>
 </resources>

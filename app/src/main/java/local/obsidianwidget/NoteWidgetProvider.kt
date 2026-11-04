@@ -118,7 +118,9 @@ class NoteWidgetProvider : AppWidgetProvider() {
 
             // Row taps are filled in with the line number and whether it's a task to tick off.
             val rowTemplate = PendingIntent.getActivity(
-                ctx, id * 10 + 1, editorIntent(ctx, id),
+                ctx, id * 10 + 1,
+                Intent(ctx, RowTapActivity::class.java).putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, id)
+                    .setData(Uri.parse("widget://$id/row")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE,
             )
             views.setPendingIntentTemplate(R.id.list, rowTemplate)
