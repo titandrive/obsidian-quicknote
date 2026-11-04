@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -87,6 +88,9 @@ class EditorActivity : ComponentActivity() {
     private var conflict by mutableStateOf(false)
     /** The note as it was on disk when it was last loaded or saved. */
     private var original: String? = null
+    private val history = Toolbar.History()
+    /** The vault's mobile toolbar buttons, once read. */
+    private var toolbar by mutableStateOf<List<Toolbar.Command>>(emptyList())
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -105,6 +109,7 @@ class EditorActivity : ComponentActivity() {
 
         enableEdgeToEdge()
         val line = intent.getIntExtra(EXTRA_LINE, -1)
+        lifecycleScope.launch { toolbar = withContext(Dispatchers.IO) { Toolbar.load(this@EditorActivity) } }
         lifecycleScope.launch {
             val text = withContext(Dispatchers.IO) { Vault.read(this@EditorActivity, cfg.uri) }.orEmpty()
             original = text
@@ -229,11 +234,16 @@ class EditorActivity : ComponentActivity() {
                     // Scrolled here rather than inside the field, so it can be moved to the tapped line.
                     BasicTextField(
                         value = value,
-                        onValueChange = { value = LivePreview.continueList(value, it) },
+                        onValueChange = {
+                            val next = LivePreview.continueList(value, it)
+                            history.record(value, next)
+                            value = next
+                        },
                         enabled = loaded,
                         onTextLayout = { layout = it },
                         modifier = Modifier
-                            .fillMaxSize()
+                            .fillMaxWidth()
+                            .weight(1f)
                             .verticalScroll(scroll)
                             .padding(horizontal = 18.dp, vertical = 8.dp)
                             .focusRequester(focus),
@@ -242,6 +252,7 @@ class EditorActivity : ComponentActivity() {
                         visualTransformation = preview,
                     )
                 }
+                if (toolbar.isNotEmpty()) ToolbarRow(p)
             }
         }
         LaunchedEffect(loaded) { if (loaded) focus.requestFocus() }
@@ -252,6 +263,47 @@ class EditorActivity : ComponentActivity() {
             val top = l.getCursorRect(value.selection.start.coerceIn(0, l.layoutInput.text.length)).top
             scroll.scrollTo((top - scroll.viewportSize / 4).toInt().coerceAtLeast(0))
             scrollToCursor = false
+        }
+    }
+
+    /** Obsidian's mobile toolbar along the bottom of the card, just above the keyboard. */
+    @Composable
+    private fun ToolbarRow(p: Palette) {
+        val tick = rememberHaptic()
+        // Read so the row redraws on every edit, keeping undo and redo's enabled state current.
+        @Suppress("UNUSED_VARIABLE") val current = value
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(Color(p.backgroundAlt))
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 6.dp, vertical = 4.dp),
+        ) {
+            for (cmd in toolbar) {
+                val enabled = when (cmd.id) {
+                    "editor:undo" -> history.canUndo
+                    "editor:redo" -> history.canRedo
+                    else -> loaded
+                }
+                IconButton(
+                    onClick = {
+                        tick()
+                        value = when (cmd.id) {
+                            "editor:undo" -> history.undo(value) ?: value
+                            "editor:redo" -> history.redo(value) ?: value
+                            else -> Toolbar.apply(cmd.id, value).also { history.record(value, it, action = true) }
+                        }
+                    },
+                    enabled = enabled,
+                    modifier = Modifier.size(44.dp),
+                ) {
+                    Icon(
+                        painterResource(cmd.icon), cmd.label, Modifier.size(20.dp),
+                        tint = Color(p.muted).copy(alpha = if (enabled) 1f else 0.35f),
+                    )
+                }
+            }
         }
     }
 
