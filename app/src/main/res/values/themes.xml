@@ -12,4 +12,13 @@
         <item name="android:windowBackground">@android:color/transparent</item>
         <item name="android:windowAnimationStyle">@android:style/Animation.Dialog</item>
     </style>
+
+    <!--
+        TapActivity: invisible, but a real window, so the app counts as in front while it's up.
+        A NoDisplay activity never does, and Android drops vibrations from apps that aren't.
+    -->
+    <style name="Theme.ObsidianWidget.Tap" parent="android:Theme.Translucent.NoTitleBar">
+        <item name="android:windowAnimationStyle">@null</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+    </style>
 </resources>
