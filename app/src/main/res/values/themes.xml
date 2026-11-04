@@ -3,6 +3,12 @@
         <item name="android:windowBackground">@android:color/black</item>
     </style>
 
+    <!-- Widget settings: the window shows the wallpaper, which the preview sits on. -->
+    <style name="Theme.ObsidianWidget.Settings" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowShowWallpaper">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+    </style>
+
     <!--
         The editor: an opaque window that shows the wallpaper behind its card. A see-through window
         would leave the launcher counting as visible, so pressing Home jumped it to its first page.

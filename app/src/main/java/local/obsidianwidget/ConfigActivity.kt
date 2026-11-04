@@ -53,13 +53,21 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.unit.toSize
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -121,6 +129,7 @@ class ConfigActivity : ComponentActivity() {
         var noteText by remember { mutableStateOf<String?>(null) }
         var picking by remember { mutableStateOf(pickOnly) }
         var pickingTheme by remember { mutableStateOf(false) }
+        var previewBounds by remember { mutableStateOf<Rect?>(null) }
 
         val pickVault = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
             if (uri != null) {
@@ -178,93 +187,103 @@ class ConfigActivity : ComponentActivity() {
                 else -> t
             }
 
-            Scaffold(
-                containerColor = MaterialTheme.colorScheme.background,
-                topBar = { PageHeader(if (existing == null) "New widget" else "Widget settings", onBack = { finish() }) },
-                bottomBar = {
-                    Box(
-                        Modifier
-                            .fillMaxWidth()
-                            .background(MaterialTheme.colorScheme.background)
-                            .navigationBarsPadding()
-                            .padding(horizontal = 16.dp, vertical = 12.dp),
-                    ) {
-                        val tick = rememberHaptic()
-                        Button(
-                            onClick = { tick(); scope.launch { save(current()) } },
-                            enabled = notePath != null && colors != null,
-                            shape = CircleShape,
-                            colors = ButtonDefaults.buttonColors(
-                                disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
-                                disabledContentColor = noteColor(),
-                            ),
-                            modifier = Modifier.fillMaxWidth().height(52.dp),
-                        ) {
-                            Text(if (existing == null) "Add widget" else "Save", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+            // The page is painted here rather than by the window, with a hole where the preview is: the
+            // window shows the wallpaper, so the preview sits on the real one, as the widget does.
+            val page = MaterialTheme.colorScheme.background
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+                    .drawBehind {
+                        drawRect(page)
+                        previewBounds?.let {
+                            drawRoundRect(Color.Black, it.topLeft, it.size, CornerRadius(24.dp.toPx()), blendMode = BlendMode.Clear)
                         }
-                    }
-                },
-            ) { pad ->
-                Column(
-                    Modifier
-                        .fillMaxSize()
-                        .padding(pad)
-                        .verticalScroll(rememberScrollState())
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    if (vaultName == null) {
-                        SectionCard("Vault", R.drawable.ic_folder) {
-                            Text(
-                                "Pick your vault's folder. With Obsidian Sync it's usually in Documents.",
-                                style = MaterialTheme.typography.bodyMedium, color = noteColor(),
-                            )
-                            Button(onClick = { pickVault.launch(null) }, shape = CircleShape, modifier = Modifier.fillMaxWidth().height(48.dp)) {
-                                Text("Choose vault folder")
+                    },
+            ) {
+                Scaffold(
+                    containerColor = Color.Transparent,
+                    topBar = { PageHeader(if (existing == null) "New widget" else "Widget settings", onBack = { finish() }) },
+                    bottomBar = {
+                        Box(
+                            Modifier
+                                .fillMaxWidth()
+                                .background(MaterialTheme.colorScheme.background)
+                                .navigationBarsPadding()
+                                .padding(horizontal = 16.dp, vertical = 12.dp),
+                        ) {
+                            val tick = rememberHaptic()
+                            Button(
+                                onClick = { tick(); scope.launch { save(current()) } },
+                                enabled = notePath != null && colors != null,
+                                shape = CircleShape,
+                                colors = ButtonDefaults.buttonColors(
+                                    disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                    disabledContentColor = noteColor(),
+                                ),
+                                modifier = Modifier.fillMaxWidth().height(52.dp),
+                            ) {
+                                Text(if (existing == null) "Add widget" else "Save", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
                             }
                         }
-                        return@Column
+                    },
+                ) { pad ->
+                    Column(
+                        Modifier
+                            .fillMaxSize()
+                            .padding(pad)
+                            .verticalScroll(rememberScrollState())
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        if (vaultName == null) {
+                            SectionCard("Vault", R.drawable.ic_folder) {
+                                Text(
+                                    "Pick your vault's folder. With Obsidian Sync it's usually in Documents.",
+                                    style = MaterialTheme.typography.bodyMedium, color = noteColor(),
+                                )
+                                Button(onClick = { pickVault.launch(null) }, shape = CircleShape, modifier = Modifier.fillMaxWidth().height(48.dp)) {
+                                    Text("Choose vault folder")
+                                }
+                            }
+                            return@Column
+                        }
+
+                        Preview(cfg, noteText) { previewBounds = it }
+
+                        SectionCard("Note", R.drawable.ic_note) {
+                            NavRow(
+                                title = notePath?.substringAfterLast('/')?.removeSuffix(".md") ?: "Choose a note",
+                                subtitle = notePath?.substringBeforeLast('/', "")?.ifEmpty { "Vault root" } ?: "Nothing picked yet",
+                                onClick = { picking = true },
+                            )
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                            NavRow(
+                                title = vaultName!!,
+                                subtitle = "Vault folder",
+                                leading = { IconTile(R.drawable.ic_folder, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
+                                onClick = { pickVault.launch(null) },
+                            )
+                        }
+
+                        SectionCard("Appearance", R.drawable.ic_palette) {
+                            NavRow(
+                                title = themeName(theme),
+                                subtitle = if (theme == ObsidianTheme.THEME_VAULT) vaultTheme.ifEmpty { "Default" } else "Theme",
+                                leading = { ThemeSwatch(swatches[theme]?.let { if (cfg.isDark(this@ConfigActivity)) it.dark else it.light }) },
+                                onClick = { pickingTheme = true },
+                            )
+                            SettingLabel("Light or dark")
+                            PillSegmented(MODES, mode, { if (it == "vault") "Obsidian" else it.replaceFirstChar(Char::uppercase) }) { mode = it }
+                            SettingLabel("Background", "How much of the wallpaper shows through")
+                            PillSegmented(OPACITIES, opacity, { "$it%" }) { opacity = it }
+                            SettingLabel("Text size")
+                            PillSegmented(TEXT_SIZES, textSize, { "${it.toInt()}" }) { textSize = it }
+                            SwitchRow("Show header", null, showHeader) { showHeader = it }
+                        }
+
+                        Spacer(Modifier.height(8.dp))
                     }
-
-                    Preview(cfg, noteText)
-
-                    SectionCard("Note", R.drawable.ic_note) {
-                        NavRow(
-                            title = notePath?.substringAfterLast('/')?.removeSuffix(".md") ?: "Choose a note",
-                            subtitle = notePath?.substringBeforeLast('/', "")?.ifEmpty { "Vault root" } ?: "Nothing picked yet",
-                            onClick = { picking = true },
-                        )
-                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                        NavRow(
-                            title = vaultName!!,
-                            subtitle = "Vault folder",
-                            leading = { IconTile(R.drawable.ic_folder, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
-                            onClick = { pickVault.launch(null) },
-                        )
-                    }
-
-                    SectionCard("Appearance", R.drawable.ic_palette) {
-                        NavRow(
-                            title = themeName(theme),
-                            subtitle = if (theme == ObsidianTheme.THEME_VAULT) vaultTheme.ifEmpty { "Default" } else "Theme",
-                            leading = { ThemeSwatch(swatches[theme]?.let { if (cfg.isDark(this@ConfigActivity)) it.dark else it.light }) },
-                            onClick = { pickingTheme = true },
-                        )
-                        SettingLabel("Light or dark")
-                        PillSegmented(MODES, mode, { if (it == "vault") "Obsidian" else it.replaceFirstChar(Char::uppercase) }) { mode = it }
-                        SettingLabel("Background", "How much of the wallpaper shows through")
-                        PillSegmented(OPACITIES, opacity, { "$it%" }) { opacity = it }
-                        SettingLabel("Text size")
-                        PillSegmented(TEXT_SIZES, textSize, { "${it.toInt()}" }) { textSize = it }
-                        SwitchRow(
-                            "Show title and buttons",
-                            if (showHeader) "The note's name and buttons above it"
-                            else "Just the note. Tap a line to edit; long-press the widget for settings",
-                            showHeader,
-                        ) { showHeader = it }
-                    }
-
-                    Spacer(Modifier.height(8.dp))
                 }
             }
 
@@ -285,9 +304,9 @@ class ConfigActivity : ComponentActivity() {
         }
     }
 
-    /** The widget as it will look, on a stand-in wallpaper so the opacity shows. */
+    /** The widget as it will look, over the real wallpaper (see the hole in the page behind it). */
     @Composable
-    private fun Preview(cfg: WidgetConfig, text: String?) {
+    private fun Preview(cfg: WidgetConfig, text: String?, onBounds: (Rect) -> Unit) {
         val p = cfg.palette(this)
         val indent = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, cfg.textSize * 1.2f, resources.displayMetrics).toInt()
         val blocks = remember(text, p, indent) {
@@ -296,8 +315,8 @@ class ConfigActivity : ComponentActivity() {
         Box(
             Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(24.dp))
-                .background(Brush.linearGradient(listOf(Color(0xFF3A6EA5), Color(0xFF8E6BBF), Color(0xFFE07A5F))))
+                // Unclipped bounds: when scrolled partly under the header, the header covers the rest.
+                .onGloballyPositioned { onBounds(Rect(it.positionInRoot(), it.size.toSize())) }
                 .padding(18.dp),
         ) {
             Column(

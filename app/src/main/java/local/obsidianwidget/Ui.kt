@@ -20,7 +20,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -57,6 +56,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
@@ -341,43 +341,47 @@ fun <T> PickerSheet(
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         containerColor = MaterialTheme.colorScheme.surfaceVariant,
     ) {
-        Column(
-            verticalArrangement = Arrangement.spacedBy(4.dp),
-            modifier = Modifier
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp)
-                .padding(bottom = 24.dp)
-                .navigationBarsPadding(),
-        ) {
+        // The title fixed, the options scrolling below it, and the sheet kept short of full height:
+        // a full-height sheet passed the end of the list's scroll on to itself and bounced.
+        val maxHeight = (LocalConfiguration.current.screenHeightDp * 0.75f).dp
+        Column(Modifier.heightIn(max = maxHeight).padding(horizontal = 16.dp)) {
             Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 4.dp, bottom = 8.dp))
-            options.forEach { option ->
-                val on = option == selected
-                val accent = MaterialTheme.colorScheme.primary
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = 52.dp)
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(if (on) accent.copy(alpha = 0.14f) else Color.Transparent)
-                        .border(2.dp, if (on) accent else Color.Transparent, RoundedCornerShape(16.dp))
-                        .clickable { tick(); onSelect(option) }
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                ) {
-                    leading?.let {
-                        it(option)
-                        Spacer(Modifier.width(12.dp))
+            Column(
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+                modifier = Modifier
+                    .weight(1f, fill = false)
+                    .verticalScroll(rememberScrollState())
+                    .padding(bottom = 24.dp),
+            ) {
+                options.forEach { option ->
+                    val on = option == selected
+                    val accent = MaterialTheme.colorScheme.primary
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 52.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(if (on) accent.copy(alpha = 0.14f) else Color.Transparent)
+                            .border(2.dp, if (on) accent else Color.Transparent, RoundedCornerShape(16.dp))
+                            .clickable { tick(); onSelect(option) }
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                    ) {
+                        leading?.let {
+                            it(option)
+                            Spacer(Modifier.width(12.dp))
+                        }
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                name(option),
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal,
+                                color = if (on) accent else MaterialTheme.colorScheme.onSurface,
+                            )
+                            detail(option)?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = noteColor()) }
+                        }
+                        if (on) Icon(painterResource(R.drawable.ic_check), "Selected", tint = accent, modifier = Modifier.size(20.dp))
                     }
-                    Column(Modifier.weight(1f)) {
-                        Text(
-                            name(option),
-                            style = MaterialTheme.typography.bodyLarge,
-                            fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal,
-                            color = if (on) accent else MaterialTheme.colorScheme.onSurface,
-                        )
-                        detail(option)?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = noteColor()) }
-                    }
-                    if (on) Icon(painterResource(R.drawable.ic_check), "Selected", tint = accent, modifier = Modifier.size(20.dp))
                 }
             }
         }
