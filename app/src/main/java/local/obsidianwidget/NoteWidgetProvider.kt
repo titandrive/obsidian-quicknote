@@ -34,8 +34,11 @@ class NoteWidgetProvider : AppWidgetProvider() {
     }
 
     override fun onReceive(ctx: Context, intent: Intent) {
-        if (intent.action != ACTION_REFRESH) return super.onReceive(ctx, intent)
-        refresh(ctx, intArrayOf(intent.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, AppWidgetManager.INVALID_APPWIDGET_ID)))
+        when (intent.action) {
+            ACTION_REFRESH -> refresh(ctx, intArrayOf(intent.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, AppWidgetManager.INVALID_APPWIDGET_ID)))
+            Intent.ACTION_MY_PACKAGE_REPLACED -> refresh(ctx, allIds(ctx))
+            else -> super.onReceive(ctx, intent)
+        }
     }
 
     /** Re-reads the theme and font from the vault, then redraws the widgets and their notes. */
@@ -62,10 +65,10 @@ class NoteWidgetProvider : AppWidgetProvider() {
         const val ACTION_REFRESH = "local.obsidianwidget.REFRESH"
 
         /**
-         * Most a note's rows may add up to and still be sent with the widget; the whole update has
-         * to fit in one cross-process call (1 MB, shared with everything else in flight).
+         * Most a note's rows may add up to and still be sent with the widget. The system passes the
+         * widget on to the launcher in a one-way call, which fails quietly past about 512 KB.
          */
-        private const val INLINE_LIMIT = 500_000
+        private const val INLINE_LIMIT = 450_000
 
         /** Redraws the widget, note and all. Reads and renders the note, so call it off the main thread. */
         fun update(ctx: Context, mgr: AppWidgetManager, id: Int) {
@@ -98,11 +101,10 @@ class NoteWidgetProvider : AppWidgetProvider() {
             // On Android 12+ every row goes with the widget, so the launcher never fetches rows while
             // scrolling (fetching showed placeholders that jumped to the real rows' heights).
             val rows = if (android.os.Build.VERSION.SDK_INT >= 31) NoteRows.build(ctx, id) else null
-            val inline = rows != null && rows.first.sumOf { it.png?.size ?: 0 } < INLINE_LIMIT
+            val inline = rows != null && rows.first.sumOf { it.image.size } < INLINE_LIMIT
             if (inline && android.os.Build.VERSION.SDK_INT >= 31) {
-                val (list, palette) = rows!!
                 val items = RemoteViews.RemoteCollectionItems.Builder().setHasStableIds(true).setViewTypeCount(1)
-                list.forEachIndexed { i, row -> items.addItem(i.toLong(), NoteRows.view(ctx, row, palette)) }
+                rows!!.first.forEachIndexed { i, row -> items.addItem(i.toLong(), NoteRows.view(ctx, row)) }
                 views.setRemoteAdapter(R.id.list, items.build())
             } else {
                 val service = Intent(ctx, NoteListService::class.java)
