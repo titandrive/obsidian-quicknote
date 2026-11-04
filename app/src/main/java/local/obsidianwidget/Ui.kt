@@ -40,6 +40,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.Typography
@@ -72,6 +74,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import kotlin.math.roundToInt
 
 /*
  * The parts the app's screens are built from, after Paid to Poop's and PurgeBot's: a plain page
@@ -263,13 +266,39 @@ fun SwitchRow(title: String, subtitle: String?, checked: Boolean, onChange: (Boo
     }
 }
 
-/** A setting's label and description, above its control. */
+/** A setting's label and description, above its control, with its current [value] at the right. */
 @Composable
-fun SettingLabel(title: String, description: String? = null) {
-    Column(Modifier.padding(top = 8.dp)) {
-        Text(title, style = MaterialTheme.typography.bodyLarge)
-        description?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = noteColor()) }
+fun SettingLabel(title: String, description: String? = null, value: String? = null) {
+    Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.bodyLarge)
+            description?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = noteColor()) }
+        }
+        value?.let { Text(it, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold) }
     }
+}
+
+/** A slider that snaps to every [step] in [range], with tick marks and a light tick on each step. */
+@Composable
+fun StepSlider(value: Int, range: IntRange, step: Int, onChange: (Int) -> Unit) {
+    val tick = rememberHaptic()
+    Slider(
+        value = value.toFloat(),
+        onValueChange = { v ->
+            val snapped = ((v / step).roundToInt() * step).coerceIn(range.first, range.last)
+            if (snapped != value) {
+                tick()
+                onChange(snapped)
+            }
+        },
+        valueRange = range.first.toFloat()..range.last.toFloat(),
+        steps = (range.last - range.first) / step - 1,
+        colors = SliderDefaults.colors(
+            inactiveTrackColor = MaterialTheme.colorScheme.background,
+            activeTickColor = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.5f),
+            inactiveTickColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+        ),
+    )
 }
 
 /** A row of options on a rounded track, the picked one on a sliding accent pill. For a few short choices. */

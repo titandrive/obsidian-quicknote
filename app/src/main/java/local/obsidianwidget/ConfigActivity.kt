@@ -79,7 +79,6 @@ class ConfigActivity : ComponentActivity() {
         const val EXTRA_PICK_ONLY = "pick_only"
 
         private val MODES = listOf("vault", "system", "light", "dark")
-        private val OPACITIES = listOf(0, 25, 50, 70, 85, 100)
         private val TEXT_SIZES = listOf(12f, 13f, 14f, 16f, 18f)
     }
 
@@ -276,8 +275,8 @@ class ConfigActivity : ComponentActivity() {
                             )
                             SettingLabel("Light or dark")
                             PillSegmented(MODES, mode, { if (it == "vault") "Obsidian" else it.replaceFirstChar(Char::uppercase) }) { mode = it }
-                            SettingLabel("Background", "How much of the wallpaper shows through")
-                            PillSegmented(OPACITIES, opacity, { "$it%" }) { opacity = it }
+                            SettingLabel("Background opacity", value = "$opacity%")
+                            StepSlider(opacity, 0..100, step = 5) { opacity = it }
                             SettingLabel("Text size")
                             PillSegmented(TEXT_SIZES, textSize, { "${it.toInt()}" }) { textSize = it }
                             SwitchRow("Show header", null, showHeader) { showHeader = it }
