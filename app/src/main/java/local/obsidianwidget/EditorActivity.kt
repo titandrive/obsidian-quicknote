@@ -101,7 +101,7 @@ class EditorActivity : ComponentActivity() {
     private var original: String? = null
     private val history = Toolbar.History()
     private var widgetId = AppWidgetManager.INVALID_APPWIDGET_ID
-    /** Whether the formatting toolbar shows; remembered between edits. */
+    /** Whether the formatting toolbar shows; remembered per widget. */
     private var showToolbar by mutableStateOf(true)
     /** The vault's mobile toolbar buttons, once read. */
     private var toolbar by mutableStateOf<List<Toolbar.Command>>(emptyList())
@@ -111,11 +111,11 @@ class EditorActivity : ComponentActivity() {
         val id = intent.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, AppWidgetManager.INVALID_APPWIDGET_ID)
         widgetId = id
         cfg = WidgetStore.load(this, id) ?: return finish()
-        showToolbar = prefs().getBoolean("toolbar", true)
+        showToolbar = cfg.showToolbar
 
         enableEdgeToEdge()
         val line = intent.getIntExtra(EXTRA_LINE, -1)
-        lifecycleScope.launch { toolbar = withContext(Dispatchers.IO) { Toolbar.load(this@EditorActivity) } }
+        lifecycleScope.launch { toolbar = withContext(Dispatchers.IO) { Toolbar.load(this@EditorActivity, cfg.vaultTree) } }
         lifecycleScope.launch {
             val text = withContext(Dispatchers.IO) { Vault.read(this@EditorActivity, cfg.uri) }.orEmpty()
             original = text
@@ -237,7 +237,10 @@ class EditorActivity : ComponentActivity() {
                     )
                     HeaderButton(R.drawable.ic_toolbar, if (showToolbar) "Hide toolbar" else "Show toolbar", if (showToolbar) accent else muted) {
                         showToolbar = !showToolbar
-                        prefs().edit().putBoolean("toolbar", showToolbar).apply()
+                        // Saved onto the widget's latest settings, which may have changed since opening.
+                        WidgetStore.load(this@EditorActivity, widgetId)?.let {
+                            WidgetStore.save(this@EditorActivity, widgetId, it.copy(showToolbar = showToolbar))
+                        }
                     }
                     val spin by rememberInfiniteTransition(label = "refresh").animateFloat(
                         0f, 360f, infiniteRepeatable(tween(900, easing = LinearEasing)), label = "spin",
@@ -246,7 +249,7 @@ class EditorActivity : ComponentActivity() {
                         if (!reloading) reload()
                     }
                     HeaderButton(R.drawable.ic_open, "Open in Obsidian", muted) {
-                        leaveFor(Intent(Intent.ACTION_VIEW, Vault.openUri(this@EditorActivity, cfg.notePath)))
+                        leaveFor(Intent(Intent.ACTION_VIEW, Vault.openUri(cfg.vaultName, cfg.notePath)))
                     }
                     HeaderButton(R.drawable.ic_settings, "Widget settings", muted) {
                         leaveFor(NoteWidgetProvider.configIntent(this@EditorActivity, widgetId, pickOnly = false))
@@ -374,8 +377,6 @@ class EditorActivity : ComponentActivity() {
             reloading = false
         }
     }
-
-    private fun prefs() = getSharedPreferences("editor", MODE_PRIVATE)
 
     @Composable
     private fun ConflictDialog(p: Palette) {

@@ -2,6 +2,7 @@ package local.obsidianwidget
 
 import android.content.Context
 import android.graphics.Color
+import android.net.Uri
 import androidx.core.graphics.ColorUtils
 import org.json.JSONObject
 import kotlin.math.roundToInt
@@ -26,10 +27,10 @@ object StyleSettings {
     }
 
     /** Null when the plugin isn't enabled in the vault. */
-    fun read(ctx: Context, sheets: List<String>): Applied? {
-        val enabled = Vault.readPath(ctx, ".obsidian/community-plugins.json") ?: return null
+    fun read(ctx: Context, tree: Uri, sheets: List<String>): Applied? {
+        val enabled = Vault.readPath(ctx, tree, ".obsidian/community-plugins.json") ?: return null
         if (!enabled.contains("\"$PLUGIN\"")) return null
-        val data = Vault.readPath(ctx, ".obsidian/plugins/$PLUGIN/data.json")
+        val data = Vault.readPath(ctx, tree, ".obsidian/plugins/$PLUGIN/data.json")
             ?.let { runCatching { JSONObject(it) }.getOrNull() } ?: JSONObject()
         return apply(sheets.flatMap(::parse), data)
     }

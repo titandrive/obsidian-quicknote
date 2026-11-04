@@ -1,6 +1,7 @@
 package local.obsidianwidget
 
 import android.content.Context
+import android.net.Uri
 import android.os.SystemClock
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
@@ -45,8 +46,8 @@ object Toolbar {
     )
 
     /** The vault's toolbar, as far as this editor can do it. */
-    fun load(ctx: Context): List<Command> {
-        val ids = Vault.readPath(ctx, ".obsidian/app.json")
+    fun load(ctx: Context, tree: Uri): List<Command> {
+        val ids = Vault.readPath(ctx, tree, ".obsidian/app.json")
             ?.let { runCatching { JSONObject(it) }.getOrNull() }
             ?.optJSONArray("mobileToolbarCommands")
             ?.let { a -> List(a.length()) { a.optString(it) } }

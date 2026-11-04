@@ -2,6 +2,7 @@ package local.obsidianwidget
 
 import android.content.Context
 import android.graphics.Color
+import android.net.Uri
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -99,34 +100,37 @@ object ObsidianTheme {
      * that goes into them. Checking those is quick; anything changed in Obsidian is picked up.
      */
     private val memory = HashMap<String, Pair<String, ThemeColors>>()
-    private var shared: Pair<Long, String>? = null
+    private val shared = HashMap<String, Pair<Long, String>>()
 
     /**
      * The part of a theme's key every theme shares (settings, plugins, snippets, fonts, the app's
      * version), reused for a few seconds so the theme picker's run of loads checks it once.
      */
-    private fun sharedStamp(ctx: Context): String = synchronized(this) {
+    private fun sharedStamp(ctx: Context, tree: Uri): String = synchronized(this) {
         val now = android.os.SystemClock.uptimeMillis()
-        shared?.takeIf { now - it.first < 3000 }?.let { return it.second }
+        shared[tree.toString()]?.takeIf { now - it.first < 3000 }?.let { return it.second }
         val stamp = Vault.stamp(
-            ctx,
+            ctx, tree,
             listOf(
                 ".obsidian/appearance.json", ".obsidian/community-plugins.json",
                 ".obsidian/plugins/obsidian-style-settings/data.json", ".obsidian/plugins/custom-font-loader/data.json",
                 ".obsidian/snippets", ".obsidian/fonts",
             ),
         ) + "|" + ctx.packageManager.getPackageInfo(ctx.packageName, 0).lastUpdateTime
-        shared = now to stamp
+        shared[tree.toString()] = now to stamp
         stamp
     }
 
-    fun load(ctx: Context, choice: String): ThemeColors {
-        val app = Vault.appearance(ctx)
+    /** The colours, mode and font of theme [choice] in the vault at [tree]. */
+    fun load(ctx: Context, tree: Uri, choice: String): ThemeColors {
+        val app = Vault.appearance(ctx, tree)
         val name = if (choice == THEME_VAULT) app?.optString("cssTheme").orEmpty() else choice
-        val key = sharedStamp(ctx) + "|" + Vault.stamp(ctx, listOf(".obsidian/themes/$name", ".obsidian/themes/$name.css"))
-        val file = File(ctx.cacheDir, "themes/${choice.hashCode().toUInt()}.json")
+        val key = sharedStamp(ctx, tree) + "|" + Vault.stamp(ctx, tree, listOf(".obsidian/themes/$name", ".obsidian/themes/$name.css"))
+        // Per vault and theme: two vaults can have a theme of the same name.
+        val id = "$tree|$choice"
+        val file = File(ctx.cacheDir, "themes/${id.hashCode().toUInt()}.json")
         synchronized(memory) {
-            memory[choice]?.takeIf { it.first == key }?.let { return it.second }
+            memory[id]?.takeIf { it.first == key }?.let { return it.second }
             runCatching {
                 val o = JSONObject(file.readText())
                 if (o.getString("key") == key) {
@@ -136,15 +140,15 @@ object ObsidianTheme {
                     )
                     // The copied font file lives in app storage; if it's gone, work it out again.
                     if (t.font.isEmpty() || File(t.font).exists()) {
-                        memory[choice] = key to t
+                        memory[id] = key to t
                         return t
                     }
                 }
             }
         }
-        val t = compute(ctx, app, name)
+        val t = compute(ctx, tree, app, name)
         synchronized(memory) {
-            memory[choice] = key to t
+            memory[id] = key to t
             runCatching {
                 file.parentFile!!.mkdirs()
                 file.writeText(
@@ -156,21 +160,21 @@ object ObsidianTheme {
         return t
     }
 
-    private fun compute(ctx: Context, app: JSONObject?, name: String): ThemeColors {
-        val css = name.takeIf { it.isNotEmpty() }?.let { Vault.themeCss(ctx, it) }
+    private fun compute(ctx: Context, tree: Uri, app: JSONObject?, name: String): ThemeColors {
+        val css = name.takeIf { it.isNotEmpty() }?.let { Vault.themeCss(ctx, tree, it) }
         val snippets = app?.optJSONArray("enabledCssSnippets")?.let { a -> List(a.length()) { a.getString(it) } }.orEmpty()
-            .mapNotNull { Vault.readPath(ctx, ".obsidian/snippets/$it.css") }
+            .mapNotNull { Vault.readPath(ctx, tree, ".obsidian/snippets/$it.css") }
         // Snippets load after the theme, so they win ties.
         val sheets = listOfNotNull(css) + snippets
         val rules = sheets.flatMap(::parseRules)
-        val style = StyleSettings.read(ctx, sheets)
+        val style = StyleSettings.read(ctx, tree, sheets)
         val accent = app?.optString("accentColor")?.takeIf { it.isNotEmpty() }
         val mode = when (app?.optString("theme")) {
             "obsidian" -> "dark"
             "moonstone" -> "light"
             else -> "system"
         }
-        val font = Fonts.load(ctx, app, sheets).orEmpty()
+        val font = Fonts.load(ctx, tree, app, sheets).orEmpty()
         return ThemeColors(
             palette(rules, style, true, accent), palette(rules, style, false, accent), mode, font,
         )

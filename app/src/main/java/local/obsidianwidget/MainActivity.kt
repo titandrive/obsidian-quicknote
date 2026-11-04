@@ -25,7 +25,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -41,18 +40,21 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            var vaultName by remember { mutableStateOf(Vault.tree(this)?.let { Vault.name(this) }) }
-            var vaultVersion by remember { mutableIntStateOf(0) }
+            // The vault new widgets start with; each widget can pick its own in its settings.
+            var vault by remember { mutableStateOf(Vault.defaultTree(this)) }
+            var vaultName by remember { mutableStateOf(if (vault == null) null else Vault.defaultName(this)) }
             // Dressed in the vault's own theme once it's read, like the widget settings.
             var colors by remember { mutableStateOf<ThemeColors?>(null) }
-            LaunchedEffect(vaultName, vaultVersion) {
-                if (vaultName != null) colors = withContext(Dispatchers.IO) { ObsidianTheme.load(this@MainActivity, ObsidianTheme.THEME_VAULT) }
+            LaunchedEffect(vault) {
+                val tree = vault ?: return@LaunchedEffect
+                colors = withContext(Dispatchers.IO) { ObsidianTheme.load(this@MainActivity, tree, ObsidianTheme.THEME_VAULT) }
             }
             val pickVault = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
                 if (uri != null) {
-                    Vault.set(this, uri)
-                    vaultName = Vault.name(this)
-                    vaultVersion++
+                    val name = Vault.take(this, uri)
+                    Vault.setDefault(this, uri, name)
+                    vault = uri
+                    vaultName = name
                 }
             }
             val look = colors?.let { WidgetConfig("", "", colors = it) }
@@ -80,7 +82,7 @@ class MainActivity : ComponentActivity() {
                                     Text("Choose vault folder")
                                 }
                             } else {
-                                NavRow(vaultName!!, "Tap to change folder", onClick = { pickVault.launch(null) })
+                                NavRow(vaultName!!, "Default for new widgets. Each widget can use its own", onClick = { pickVault.launch(null) })
                             }
                         }
 

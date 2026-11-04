@@ -2,6 +2,7 @@ package local.obsidianwidget
 
 import android.content.Context
 import android.graphics.Typeface
+import android.net.Uri
 import android.util.Base64
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
@@ -19,12 +20,12 @@ object Fonts {
 
     /** Copies the vault's font into app storage and returns its path, or null to use the system font. */
     /** [sheets] is the CSS in effect: the theme and enabled snippets. */
-    fun load(ctx: Context, app: JSONObject?, sheets: List<String>): String? {
+    fun load(ctx: Context, tree: Uri, app: JSONObject?, sheets: List<String>): String? {
         val family = app?.optString("textFontFamily").orEmpty()
             .split(',').firstOrNull()?.trim()?.trim('"', '\'').orEmpty()
-        val bytes = fromFontLoader(ctx)
+        val bytes = fromFontLoader(ctx, tree)
             ?: fromFontFace(sheets, family)
-            ?: fromFontsFolder(ctx, family)
+            ?: fromFontsFolder(ctx, tree, family)
             ?: return null
         val file = File(ctx.filesDir, "fonts/${Integer.toHexString(bytes.contentHashCode())}-${bytes.size}.ttf")
         if (!file.exists()) {
@@ -44,14 +45,14 @@ object Fonts {
     fun compose(path: String?): FontFamily =
         path?.let { File(it) }?.takeIf { it.exists() }?.let { FontFamily(Font(it)) } ?: FontFamily.Default
 
-    private fun fromFontLoader(ctx: Context): ByteArray? {
-        val enabled = Vault.readPath(ctx, "$CONFIG/community-plugins.json") ?: return null
+    private fun fromFontLoader(ctx: Context, tree: Uri): ByteArray? {
+        val enabled = Vault.readPath(ctx, tree, "$CONFIG/community-plugins.json") ?: return null
         if (!enabled.contains("\"custom-font-loader\"")) return null
-        val data = Vault.readPath(ctx, "$CONFIG/plugins/custom-font-loader/data.json")
+        val data = Vault.readPath(ctx, tree, "$CONFIG/plugins/custom-font-loader/data.json")
             ?.let { runCatching { JSONObject(it) }.getOrNull() } ?: return null
         val folder = data.optString("font_folder", "$CONFIG/fonts/").trim('/')
         val font = data.optString("font").takeIf { it.isNotEmpty() } ?: return null
-        return Vault.find(ctx, "$folder/$font")?.let { Vault.readBytes(ctx, it) }?.takeIf(::usable)
+        return Vault.find(ctx, tree, "$folder/$font")?.let { Vault.readBytes(ctx, it) }?.takeIf(::usable)
     }
 
     private fun fromFontFace(sheets: List<String>, family: String): ByteArray? {
@@ -68,14 +69,14 @@ object Fonts {
         return null
     }
 
-    private fun fromFontsFolder(ctx: Context, family: String): ByteArray? {
+    private fun fromFontsFolder(ctx: Context, tree: Uri, family: String): ByteArray? {
         if (family.isEmpty()) return null
         val want = normalize(family)
-        val name = Vault.list(ctx, "$CONFIG/fonts")
+        val name = Vault.list(ctx, tree, "$CONFIG/fonts")
             .filter { it.endsWith(".ttf", true) || it.endsWith(".otf", true) }
             .filter { normalize(it.substringBeforeLast('.')).startsWith(want) }
             .minByOrNull { if ("regular" in it.lowercase()) 0 else it.length } ?: return null
-        return Vault.find(ctx, "$CONFIG/fonts/$name")?.let { Vault.readBytes(ctx, it) }?.takeIf(::usable)
+        return Vault.find(ctx, tree, "$CONFIG/fonts/$name")?.let { Vault.readBytes(ctx, it) }?.takeIf(::usable)
     }
 
     private fun normalize(s: String) = s.lowercase().filter { it.isLetterOrDigit() }

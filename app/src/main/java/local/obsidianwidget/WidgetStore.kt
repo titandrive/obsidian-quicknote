@@ -5,7 +5,7 @@ import android.content.res.Configuration
 import android.net.Uri
 import org.json.JSONObject
 
-/** Per-widget settings. [mode] is one of "vault", "system", "dark", "light". */
+/** A widget's settings; every widget has its own. [mode] is one of "vault", "system", "dark", "light". */
 data class WidgetConfig(
     val noteUri: String,
     val notePath: String,
@@ -16,7 +16,16 @@ data class WidgetConfig(
     val colors: ThemeColors? = null,
     /** Whether the widget shows its title and buttons above the note. */
     val showHeader: Boolean = true,
+    /** The vault this widget's note is in: its tree URI, and its name (for obsidian:// links). */
+    val vault: String = "",
+    val vaultName: String = "",
+    /** Minutes between checks for changes made in Obsidian; 0 is off. */
+    val checkMinutes: Int = 30,
+    /** Whether the editor shows its formatting toolbar for this widget's note. */
+    val showToolbar: Boolean = true,
 ) {
+    val vaultTree: Uri get() = Uri.parse(vault)
+
     /** The vault's font, copied into app storage, or null for the system font. */
     val fontFile: String? get() = colors?.font?.takeIf { it.isNotEmpty() }
 
@@ -46,6 +55,7 @@ data class WidgetConfig(
     fun toJson(): JSONObject = JSONObject()
         .put("noteUri", noteUri).put("notePath", notePath).put("theme", theme).put("mode", mode)
         .put("opacity", opacity).put("textSize", textSize.toDouble()).put("showHeader", showHeader)
+        .put("vault", vault).put("vaultName", vaultName).put("checkMinutes", checkMinutes).put("showToolbar", showToolbar)
         .apply {
             colors?.let {
                 put("dark", it.dark.toJson()).put("light", it.light.toJson()).put("vaultMode", it.vaultMode).put("vaultFont", it.font)
@@ -61,6 +71,8 @@ data class WidgetConfig(
                 o.optString("vaultFont"),
             ) else null,
             o.optBoolean("showHeader", true),
+            o.optString("vault"), o.optString("vaultName"),
+            o.optInt("checkMinutes", 30), o.optBoolean("showToolbar", true),
         )
     }
 }
@@ -68,8 +80,14 @@ data class WidgetConfig(
 object WidgetStore {
     private fun prefs(ctx: Context) = ctx.getSharedPreferences("widgets", Context.MODE_PRIVATE)
 
-    fun load(ctx: Context, id: Int): WidgetConfig? =
-        prefs(ctx).getString("w$id", null)?.let { runCatching { WidgetConfig.fromJson(JSONObject(it)) }.getOrNull() }
+    fun load(ctx: Context, id: Int): WidgetConfig? {
+        val cfg = prefs(ctx).getString("w$id", null)?.let { runCatching { WidgetConfig.fromJson(JSONObject(it)) }.getOrNull() }
+            ?: return null
+        if (cfg.vault.isNotEmpty()) return cfg
+        // Saved before widgets had their own vaults: it's the one the app had then.
+        val tree = Vault.defaultTree(ctx) ?: return cfg
+        return cfg.copy(vault = tree.toString(), vaultName = Vault.defaultName(ctx)).also { save(ctx, id, it) }
+    }
 
     fun save(ctx: Context, id: Int, cfg: WidgetConfig) {
         prefs(ctx).edit().putString("w$id", cfg.toJson().toString()).apply()

@@ -16,7 +16,7 @@ class RenderProbe : BroadcastReceiver() {
         thread {
             try {
                 if (intent.getBooleanExtra("check", false)) {
-                    ChangeCheck.check(ctx)
+                    for (id in NoteWidgetProvider.allIds(ctx)) ChangeCheck.check(ctx, id)
                     return@thread
                 }
                 val id = intent.getIntExtra("id", 0)

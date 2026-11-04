@@ -33,19 +33,15 @@ class NoteWidgetProvider : AppWidgetProvider() {
         for (id in ids) {
             WidgetStore.delete(ctx, id)
             NoteRows.forget(ctx, id)
-            ChangeCheck.forget(ctx, id)
+            ChangeCheck.cancel(ctx, id)
         }
     }
-
-    override fun onEnabled(ctx: Context) = ChangeCheck.schedule(ctx)
-
-    override fun onDisabled(ctx: Context) = ChangeCheck.schedule(ctx)
 
     override fun onReceive(ctx: Context, intent: Intent) {
         when (intent.action) {
             ACTION_REFRESH -> refresh(ctx, intArrayOf(intent.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, AppWidgetManager.INVALID_APPWIDGET_ID)), spin = true)
             Intent.ACTION_MY_PACKAGE_REPLACED -> {
-                ChangeCheck.schedule(ctx)
+                ChangeCheck.scheduleAll(ctx)
                 refresh(ctx, allIds(ctx))
             }
             else -> super.onReceive(ctx, intent)
@@ -65,7 +61,7 @@ class NoteWidgetProvider : AppWidgetProvider() {
                 if (spin) for (id in ids) mgr.partiallyUpdateAppWidget(id, spinner(ctx, id, true))
                 for (id in ids) {
                     WidgetStore.load(ctx, id)?.let { cfg ->
-                        runCatching { ObsidianTheme.load(ctx, cfg.theme) }.onSuccess {
+                        runCatching { ObsidianTheme.load(ctx, cfg.vaultTree, cfg.theme) }.onSuccess {
                             WidgetStore.save(ctx, id, cfg.copy(colors = it))
                         }
                     }
@@ -207,7 +203,7 @@ class NoteWidgetProvider : AppWidgetProvider() {
                 R.id.btn_open,
                 activity(ctx, id, 5, tapIntent(ctx, id, "open").putExtra(
                     TapActivity.EXTRA_FORWARD,
-                    Intent(Intent.ACTION_VIEW, Vault.openUri(ctx, cfg.notePath)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                    Intent(Intent.ACTION_VIEW, Vault.openUri(cfg.vaultName, cfg.notePath)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
                 )),
             )
             views.setOnClickPendingIntent(R.id.btn_refresh, activity(ctx, id, 6, tapIntent(ctx, id, "refresh").putExtra(TapActivity.EXTRA_REFRESH, true)))

@@ -3,6 +3,7 @@ package local.obsidianwidget
 import android.app.Activity
 import android.appwidget.AppWidgetManager
 import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import android.util.TypedValue
 import androidx.activity.ComponentActivity
@@ -98,9 +99,9 @@ class ConfigActivity : ComponentActivity() {
 
     private suspend fun save(cfg: WidgetConfig) {
         val full = if (cfg.colors != null) cfg
-        else cfg.copy(colors = withContext(Dispatchers.IO) { ObsidianTheme.load(this@ConfigActivity, cfg.theme) })
+        else cfg.copy(colors = withContext(Dispatchers.IO) { ObsidianTheme.load(this@ConfigActivity, cfg.vaultTree, cfg.theme) })
         WidgetStore.save(this, widgetId, full)
-        ChangeCheck.schedule(this)
+        ChangeCheck.schedule(this, widgetId)
         withContext(Dispatchers.IO) { NoteWidgetProvider.update(this@ConfigActivity, AppWidgetManager.getInstance(this@ConfigActivity), widgetId) }
         setResult(Activity.RESULT_OK, Intent().putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, widgetId))
         finish()
@@ -109,8 +110,9 @@ class ConfigActivity : ComponentActivity() {
     @Composable
     private fun Screen(existing: WidgetConfig?, pickOnly: Boolean) {
         val scope = rememberCoroutineScope()
-        var vaultName by remember { mutableStateOf(Vault.tree(this)?.let { Vault.name(this) }) }
-        var vaultVersion by remember { mutableIntStateOf(0) }
+        // This widget's vault; a new widget starts with the app's default one.
+        var vault by remember { mutableStateOf(existing?.vault?.takeIf { it.isNotEmpty() } ?: Vault.defaultTree(this)?.toString()) }
+        var vaultName by remember { mutableStateOf(if (vault == null) null else existing?.vaultName?.takeIf { it.isNotEmpty() } ?: Vault.defaultName(this)) }
         var notes by remember { mutableStateOf<List<Note>?>(null) }
         var themes by remember { mutableStateOf<List<String>>(emptyList()) }
         var vaultTheme by remember { mutableStateOf("") }
@@ -124,6 +126,7 @@ class ConfigActivity : ComponentActivity() {
         var opacity by remember { mutableIntStateOf(existing?.opacity ?: 100) }
         var textSize by remember { mutableStateOf(existing?.textSize ?: 14f) }
         var showHeader by remember { mutableStateOf(existing?.showHeader ?: true) }
+        var checkMinutes by remember { mutableIntStateOf(existing?.checkMinutes ?: 30) }
         var colors by remember { mutableStateOf(existing?.colors) }
         var noteText by remember { mutableStateOf<String?>(null) }
         var picking by remember { mutableStateOf(pickOnly) }
@@ -132,40 +135,50 @@ class ConfigActivity : ComponentActivity() {
 
         val pickVault = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
             if (uri != null) {
-                Vault.set(this, uri)
-                vaultName = Vault.name(this)
-                vaultVersion++
+                val name = Vault.take(this, uri)
+                // The first vault picked anywhere also becomes the default for new widgets.
+                if (Vault.defaultTree(this) == null) Vault.setDefault(this, uri, name)
+                vault = uri.toString()
+                vaultName = name
                 notePath = null
                 noteUri = null
+                swatches.clear()
             }
         }
 
-        LaunchedEffect(vaultName, vaultVersion) {
-            if (vaultName == null) return@LaunchedEffect
+        LaunchedEffect(vault) {
+            val tree = vault?.let(Uri::parse) ?: return@LaunchedEffect
             notes = null
             withContext(Dispatchers.IO) {
-                themes = Vault.themes(this@ConfigActivity)
-                vaultTheme = Vault.appearance(this@ConfigActivity)?.optString("cssTheme").orEmpty()
-                notes = Vault.notes(this@ConfigActivity).sortedByDescending { it.modified }
+                themes = Vault.themes(this@ConfigActivity, tree)
+                vaultTheme = Vault.appearance(this@ConfigActivity, tree)?.optString("cssTheme").orEmpty()
+                notes = Vault.notes(this@ConfigActivity, tree).sortedByDescending { it.modified }
             }
             if (notePath == null) picking = true
         }
-        LaunchedEffect(theme, vaultName) {
-            if (vaultName != null) colors = withContext(Dispatchers.IO) { ObsidianTheme.load(this@ConfigActivity, theme) }
+        LaunchedEffect(theme, vault) {
+            val tree = vault?.let(Uri::parse) ?: return@LaunchedEffect
+            colors = withContext(Dispatchers.IO) { ObsidianTheme.load(this@ConfigActivity, tree, theme) }
             colors?.let { swatches[theme] = it }
         }
         // Swatches for the theme sheet, worked out as soon as the vault's themes are known (cached
         // ones come back at once), so they're ready by the time the sheet opens.
         LaunchedEffect(themes) {
+            val tree = vault?.let(Uri::parse) ?: return@LaunchedEffect
             for (t in listOf(ObsidianTheme.THEME_VAULT, ObsidianTheme.THEME_DEFAULT) + themes) {
-                if (t !in swatches) swatches[t] = withContext(Dispatchers.IO) { ObsidianTheme.load(this@ConfigActivity, t) }
+                if (t !in swatches) swatches[t] = withContext(Dispatchers.IO) { ObsidianTheme.load(this@ConfigActivity, tree, t) }
             }
         }
         LaunchedEffect(noteUri) {
             noteText = noteUri?.let { u -> withContext(Dispatchers.IO) { Vault.read(this@ConfigActivity, android.net.Uri.parse(u)) } }
         }
 
-        fun current() = WidgetConfig(noteUri.orEmpty(), notePath.orEmpty(), theme, mode, opacity, textSize, colors, showHeader)
+        fun current() = WidgetConfig(
+            noteUri = noteUri.orEmpty(), notePath = notePath.orEmpty(), theme = theme, mode = mode,
+            opacity = opacity, textSize = textSize, colors = colors, showHeader = showHeader,
+            vault = vault.orEmpty(), vaultName = vaultName.orEmpty(), checkMinutes = checkMinutes,
+            showToolbar = existing?.showToolbar ?: true,
+        )
         val cfg = current()
 
         // The screen wears the widget's own theme and font, so changes show on it as they're made.
@@ -283,18 +296,14 @@ class ConfigActivity : ComponentActivity() {
                         }
 
                         SectionCard("Updates", R.drawable.ic_refresh) {
-                            var check by remember { mutableIntStateOf(ChangeCheck.minutes(this@ConfigActivity)) }
-                            SettingLabel("Check for changes", "Picks up edits made in Obsidian, for all widgets")
-                            PillSegmented(ChangeCheck.CHOICES, check, {
+                            SettingLabel("Check for changes", "Picks up edits made in Obsidian")
+                            PillSegmented(ChangeCheck.CHOICES, checkMinutes, {
                                 when (it) {
                                     0 -> "Off"
                                     in 1..59 -> "${it}m"
                                     else -> "${it / 60}h"
                                 }
-                            }) {
-                                check = it
-                                ChangeCheck.setMinutes(this@ConfigActivity, it)
-                            }
+                            }) { checkMinutes = it }
                         }
 
                         Spacer(Modifier.height(8.dp))
