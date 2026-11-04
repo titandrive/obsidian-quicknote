@@ -2,7 +2,6 @@ package local.obsidianwidget
 
 import android.os.Build
 import android.text.SpannableStringBuilder
-import android.view.HapticFeedbackConstants
 import android.widget.TextView
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateDpAsState
@@ -59,7 +58,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontFamily
@@ -137,8 +135,8 @@ private fun Color.over(under: Color) = Color(androidx.core.graphics.ColorUtils.c
 /** A light tick, as Paid to Poop gives every tap. */
 @Composable
 fun rememberHaptic(): () -> Unit {
-    val view = LocalView.current
-    return { view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK) }
+    val ctx = LocalContext.current
+    return { Haptics.tick(ctx) }
 }
 
 /** Description text under a setting: softer than its label, so it never reads as a heading. */

@@ -1,6 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- The light tick on taps. -->
+    <uses-permission android:name="android.permission.VIBRATE" />
+
     <!-- Lets "Open in Obsidian" resolve obsidian:// links on Android 11+. -->
     <queries>
         <intent>
@@ -46,9 +49,9 @@
             android:windowSoftInputMode="adjustResize"
             android:theme="@style/Theme.ObsidianWidget.Editor" />
 
-        <!-- Takes taps on the widget's lines: ticks a task without showing anything, or opens the editor. -->
+        <!-- Every tap on the widget: gives a haptic tick, then does what was tapped, showing nothing itself. -->
         <activity
-            android:name=".RowTapActivity"
+            android:name=".TapActivity"
             android:exported="false"
             android:taskAffinity=""
             android:excludeFromRecents="true"

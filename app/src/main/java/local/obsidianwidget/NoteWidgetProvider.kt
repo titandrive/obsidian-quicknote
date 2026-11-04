@@ -120,33 +120,28 @@ class NoteWidgetProvider : AppWidgetProvider() {
             views.setEmptyView(R.id.list, R.id.empty)
 
             // Row taps are filled in with the line number and whether it's a task to tick off.
+            // Every tap goes through TapActivity, which gives the haptic tick a widget can't.
+            // Row taps are filled in with the line number and whether it's a task to tick off.
             val rowTemplate = PendingIntent.getActivity(
-                ctx, id * 10 + 1,
-                Intent(ctx, RowTapActivity::class.java).putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, id)
-                    .setData(Uri.parse("widget://$id/row")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                ctx, id * 10 + 1, tapIntent(ctx, id, "row"),
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE,
             )
             views.setPendingIntentTemplate(R.id.list, rowTemplate)
 
-            val edit = activity(ctx, id, 2, editorIntent(ctx, id))
+            val edit = activity(ctx, id, 2, tapIntent(ctx, id, "edit").putExtra(TapActivity.EXTRA_FORWARD, editorIntent(ctx, id)))
             views.setOnClickPendingIntent(R.id.btn_edit, edit)
             views.setOnClickPendingIntent(R.id.empty, edit)
             // The note's name switches notes; the cog has the rest of the settings.
-            views.setOnClickPendingIntent(R.id.title, activity(ctx, id, 3, configIntent(ctx, id, pickOnly = true)))
-            views.setOnClickPendingIntent(R.id.btn_settings, activity(ctx, id, 4, configIntent(ctx, id, pickOnly = false)))
+            views.setOnClickPendingIntent(R.id.title, activity(ctx, id, 3, tapIntent(ctx, id, "pick").putExtra(TapActivity.EXTRA_FORWARD, configIntent(ctx, id, pickOnly = true))))
+            views.setOnClickPendingIntent(R.id.btn_settings, activity(ctx, id, 4, tapIntent(ctx, id, "settings").putExtra(TapActivity.EXTRA_FORWARD, configIntent(ctx, id, pickOnly = false))))
             views.setOnClickPendingIntent(
                 R.id.btn_open,
-                activity(ctx, id, 5, Intent(Intent.ACTION_VIEW, Vault.openUri(ctx, cfg.notePath)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)),
+                activity(ctx, id, 5, tapIntent(ctx, id, "open").putExtra(
+                    TapActivity.EXTRA_FORWARD,
+                    Intent(Intent.ACTION_VIEW, Vault.openUri(ctx, cfg.notePath)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                )),
             )
-            views.setOnClickPendingIntent(
-                R.id.btn_refresh,
-                PendingIntent.getBroadcast(
-                    ctx, id * 10 + 6,
-                    Intent(ctx, NoteWidgetProvider::class.java).setAction(ACTION_REFRESH)
-                        .putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, id),
-                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-                ),
-            )
+            views.setOnClickPendingIntent(R.id.btn_refresh, activity(ctx, id, 6, tapIntent(ctx, id, "refresh").putExtra(TapActivity.EXTRA_REFRESH, true)))
             mgr.updateAppWidget(id, views)
             if (!inline) mgr.notifyAppWidgetViewDataChanged(id, R.id.list)
         }
@@ -172,6 +167,12 @@ class NoteWidgetProvider : AppWidgetProvider() {
 
         fun allIds(ctx: Context): IntArray = AppWidgetManager.getInstance(ctx)
             .getAppWidgetIds(ComponentName(ctx, NoteWidgetProvider::class.java))
+
+        /** An intent for [TapActivity]; [what] keeps each button's PendingIntent distinct. */
+        private fun tapIntent(ctx: Context, id: Int, what: String) = Intent(ctx, TapActivity::class.java)
+            .putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, id)
+            .setData(Uri.parse("widget://$id/tap/$what"))
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
 
         fun editorIntent(ctx: Context, id: Int) = Intent(ctx, EditorActivity::class.java)
             .putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, id)
