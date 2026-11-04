@@ -3,10 +3,12 @@ package local.obsidianwidget
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.OffsetMapping
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.TransformedText
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextDecoration
@@ -217,6 +219,38 @@ class LivePreview(
     }
 
     companion object {
+        private val LIST_PREFIX = Regex("^((?:[ \\t]*>[ \\t]?)*)([ \\t]*)([-*+] \\[.] |[-*+] |(\\d+)([.)]) )?")
+
+        /**
+         * Obsidian's Enter key in lists: if [new] is [old] with a newline typed after a list
+         * item, quote or task, the new line gets the next marker ("- ", "- [ ] ", "2. ", "> ").
+         * On an item with nothing after its marker, Enter ends the list and removes the marker.
+         */
+        fun continueList(old: TextFieldValue, new: TextFieldValue): TextFieldValue {
+            val t = new.text
+            val pos = new.selection.start
+            if (!new.selection.collapsed || pos < 1 || t[pos - 1] != '\n') return new
+            // Exactly one new line break; the keyboard may also autocorrect the last word as Enter is pressed.
+            if (t.count { it == '\n' } != old.text.count { it == '\n' } + 1) return new
+            val lineStart = t.lastIndexOf('\n', pos - 2) + 1
+            val line = t.substring(lineStart, pos - 1)
+            val m = LIST_PREFIX.find(line) ?: return new
+            val (quote, indent, marker) = Triple(m.groupValues[1], m.groupValues[2], m.groupValues[3])
+            if (quote.isEmpty() && marker.isEmpty()) return new
+            if (line.substring(m.value.length).isBlank()) {
+                // An empty item: end the list, leaving the line empty, instead of starting another.
+                return TextFieldValue(t.removeRange(lineStart, pos), TextRange(lineStart))
+            }
+            val next = when {
+                marker.isEmpty() -> ""
+                m.groupValues[4].isNotEmpty() -> "${m.groupValues[4].toInt() + 1}${m.groupValues[5]} "
+                marker.length > 2 -> "${marker[0]} [ ] "
+                else -> marker
+            }
+            val prefix = quote + indent + next
+            return TextFieldValue(t.substring(0, pos) + prefix + t.substring(pos), TextRange(pos + prefix.length))
+        }
+
         /** The 0-based lines touched by the selection [start, end] in [text]. */
         fun activeLines(text: String, start: Int, end: Int): IntRange {
             fun lineOf(i: Int) = text.subSequence(0, i.coerceIn(0, text.length)).count { it == '\n' }

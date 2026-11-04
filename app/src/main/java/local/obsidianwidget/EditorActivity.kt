@@ -216,7 +216,7 @@ class EditorActivity : ComponentActivity() {
                 CompositionLocalProvider(LocalTextSelectionColors provides TextSelectionColors(accent, accent.copy(alpha = 0.35f))) {
                     BasicTextField(
                         value = value,
-                        onValueChange = { value = it },
+                        onValueChange = { value = LivePreview.continueList(value, it) },
                         enabled = loaded,
                         modifier = Modifier
                             .fillMaxSize()
