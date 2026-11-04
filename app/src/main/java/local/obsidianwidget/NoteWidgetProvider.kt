@@ -138,6 +138,9 @@ class NoteWidgetProvider : AppWidgetProvider() {
             }
             // A launcher may reapply this onto the existing views, so set the still icon back explicitly.
             applySpinner(views, looks, false)
+            // The drawn title replaces the layout's plain placeholder.
+            views.setViewVisibility(R.id.title, android.view.View.VISIBLE)
+            views.setViewVisibility(R.id.title_text, android.view.View.GONE)
 
             if (cfg == null) {
                 views.setImageViewBitmap(R.id.title, title(ctx, id, null, ctx.getString(R.string.app_name), p))

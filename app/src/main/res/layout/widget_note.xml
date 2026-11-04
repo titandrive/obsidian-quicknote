@@ -38,9 +38,27 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
+                android:visibility="gone"
                 android:minHeight="34dp"
                 android:scaleType="fitStart"
                 android:paddingVertical="6dp" />
+
+            <!--
+                What shows until the app draws the real title: in the widget picker's preview, and if
+                the launcher ever shows the widget before the app has redrawn it (after an update).
+            -->
+            <TextView
+                android:id="@+id/title_text"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:ellipsize="end"
+                android:singleLine="true"
+                android:paddingVertical="8dp"
+                android:text="@string/widget_title_placeholder"
+                android:textColor="#FFDADADA"
+                android:textSize="15sp"
+                android:textStyle="bold" />
 
             <ImageView
                 android:id="@+id/btn_refresh"

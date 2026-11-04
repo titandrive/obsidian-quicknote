@@ -133,6 +133,11 @@ class ConfigActivity : ComponentActivity() {
         var pickingTheme by remember { mutableStateOf(false) }
         var previewBounds by remember { mutableStateOf<Rect?>(null) }
 
+        // Back from the All files access screen: switch to Live if access was turned on.
+        val allFilesAccess = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+            if (ChangeCheck.canInstant()) checkMinutes = ChangeCheck.INSTANT
+        }
+
         val pickVault = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
             if (uri != null) {
                 val name = Vault.take(this, uri)
@@ -298,14 +303,32 @@ class ConfigActivity : ComponentActivity() {
                         }
 
                         SectionCard("Updates", R.drawable.ic_refresh) {
-                            SettingLabel("Check for changes", "Picks up edits made in Obsidian")
+                            val live = checkMinutes == ChangeCheck.INSTANT
+                            SettingLabel(
+                                "Check for changes",
+                                when {
+                                    live && !ChangeCheck.canInstant() -> "Live needs All files access; checking every 30 minutes instead"
+                                    live -> "Live: moments after the note is saved"
+                                    else -> "Picks up edits made in Obsidian"
+                                },
+                            )
                             PillSegmented(ChangeCheck.CHOICES, checkMinutes, {
                                 when (it) {
                                     0 -> "Off"
+                                    ChangeCheck.INSTANT -> "Live"
                                     in 1..59 -> "${it}m"
                                     else -> "${it / 60}h"
                                 }
-                            }) { checkMinutes = it }
+                            }) {
+                                if (it == ChangeCheck.INSTANT && !ChangeCheck.canInstant()) {
+                                    // Ask for the access first; Live is picked once it's granted.
+                                    allFilesAccess.launch(
+                                        Intent(android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, Uri.parse("package:$packageName")),
+                                    )
+                                } else {
+                                    checkMinutes = it
+                                }
+                            }
                         }
 
                         Spacer(Modifier.height(8.dp))

@@ -3,8 +3,12 @@ package local.obsidianwidget
 import android.appwidget.AppWidgetManager
 import android.content.Context
 import android.provider.DocumentsContract.Document
+import android.provider.MediaStore
+import androidx.work.Constraints
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.ExistingWorkPolicy
+import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
@@ -12,30 +16,62 @@ import androidx.work.workDataOf
 import java.util.concurrent.TimeUnit
 
 /**
- * Checks every so often whether a widget's note, theme or light/dark changed (say, edited in
- * Obsidian), and redraws the widget if something did. Looking is cheap: the note's date and size,
- * and the theme from its cache. Each widget has its own schedule, set in its settings.
+ * Checks whether a widget's note, theme or light/dark changed (say, edited in Obsidian), and
+ * redraws the widget if something did. Looking is cheap: the note's date and size, and the theme
+ * from its cache. Each widget has its own schedule, set in its settings: every so many minutes,
+ * or [INSTANT].
  */
 object ChangeCheck {
+    /**
+     * Checks whenever a file changes on shared storage: Android wakes the app a moment after, from
+     * its index of files. It only tells apps that can see the files, so this needs All files access.
+     */
+    const val INSTANT = -1
+
     /** Minutes between checks; 0 is off. WorkManager runs periodic work at most every 15 minutes. */
-    val CHOICES = listOf(0, 15, 30, 60, 180)
+    val CHOICES = listOf(0, INSTANT, 15, 30, 60, 180)
 
     private fun work(id: Int) = "change-check-$id"
 
+    fun canInstant() = android.os.Build.VERSION.SDK_INT >= 30 && android.os.Environment.isExternalStorageManager()
+
     private fun prefs(ctx: Context) = ctx.getSharedPreferences("app", Context.MODE_PRIVATE)
 
-    /** Starts, changes or stops widget [id]'s check to match its setting. */
-    fun schedule(ctx: Context, id: Int) {
+    /**
+     * Starts, changes or stops widget [id]'s check to match its setting. [rearm] is an instant
+     * check setting up the next one from inside the current run, which it must not cancel.
+     */
+    fun schedule(ctx: Context, id: Int, rearm: Boolean = false) {
         val wm = WorkManager.getInstance(ctx)
         val minutes = WidgetStore.load(ctx, id)?.checkMinutes ?: 0
         if (minutes == 0) {
             wm.cancelUniqueWork(work(id))
             return
         }
+        if (minutes == INSTANT && canInstant()) {
+            // Fires once on the next change, after things settle for a second; doWork arms it again.
+            wm.enqueueUniqueWork(
+                work(id),
+                if (rearm) ExistingWorkPolicy.APPEND_OR_REPLACE else ExistingWorkPolicy.REPLACE,
+                OneTimeWorkRequestBuilder<Worker>()
+                    .setConstraints(
+                        Constraints.Builder()
+                            .addContentUriTrigger(MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL), true)
+                            .setTriggerContentUpdateDelay(1, TimeUnit.SECONDS)
+                            .setTriggerContentMaxDelay(5, TimeUnit.SECONDS)
+                            .build(),
+                    )
+                    .setInputData(workDataOf("id" to id))
+                    .build(),
+            )
+            return
+        }
+        // Instant without the access it needs falls back to every 30 minutes.
+        val every = if (minutes == INSTANT) 30 else minutes
         wm.enqueueUniquePeriodicWork(
             work(id),
             ExistingPeriodicWorkPolicy.UPDATE,
-            PeriodicWorkRequestBuilder<Worker>(minutes.toLong(), TimeUnit.MINUTES)
+            PeriodicWorkRequestBuilder<Worker>(every.toLong(), TimeUnit.MINUTES)
                 .setInputData(workDataOf("id" to id))
                 .build(),
         )
@@ -55,7 +91,10 @@ object ChangeCheck {
 
     class Worker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, params) {
         override suspend fun doWork(): Result {
-            check(applicationContext, inputData.getInt("id", AppWidgetManager.INVALID_APPWIDGET_ID))
+            val id = inputData.getInt("id", AppWidgetManager.INVALID_APPWIDGET_ID)
+            check(applicationContext, id)
+            // An instant check only fires once; arm it again for the next change.
+            if (WidgetStore.load(applicationContext, id)?.checkMinutes == INSTANT) schedule(applicationContext, id, rearm = true)
             return Result.success()
         }
     }

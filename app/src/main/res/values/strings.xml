@@ -6,5 +6,6 @@
     <string name="change_note">Change note</string>
     <string name="settings">Widget settings</string>
     <string name="open_in_obsidian">Open in Obsidian</string>
+    <string name="widget_title_placeholder">Note</string>
     <string name="empty_note">Empty note. Tap to write.</string>
 </resources>
