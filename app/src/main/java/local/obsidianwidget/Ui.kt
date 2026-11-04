@@ -165,13 +165,15 @@ fun PageHeader(title: String, onBack: () -> Unit, action: (@Composable () -> Uni
             .heightIn(min = 56.dp)
             .padding(start = 4.dp, end = 12.dp, top = 4.dp),
     ) {
+        // Colours set outright: on a see-through page (settings), the inherited text colour is black.
         IconButton(onClick = { tick(); onBack() }) {
-            Icon(painterResource(R.drawable.ic_back), "Back", Modifier.size(22.dp))
+            Icon(painterResource(R.drawable.ic_back), "Back", Modifier.size(22.dp), tint = MaterialTheme.colorScheme.onBackground)
         }
         Text(
             title,
             style = MaterialTheme.typography.titleLarge,
             fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onBackground,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f),

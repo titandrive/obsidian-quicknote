@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">Obsidian Widget</string>
+    <string name="app_name">Obsidian Quicknote Widget</string>
     <string name="widget_description">Shows a note from your vault. Tap it to edit.</string>
     <string name="refresh">Refresh</string>
     <string name="edit">Edit note</string>

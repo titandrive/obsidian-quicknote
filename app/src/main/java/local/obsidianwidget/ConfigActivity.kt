@@ -216,6 +216,8 @@ class ConfigActivity : ComponentActivity() {
             ) {
                 Scaffold(
                     containerColor = Color.Transparent,
+                    // Transparent has no matching text colour, so give the page's own.
+                    contentColor = MaterialTheme.colorScheme.onBackground,
                     topBar = { PageHeader(if (existing == null) "New widget" else "Widget settings", onBack = { finish() }) },
                     bottomBar = {
                         Box(
