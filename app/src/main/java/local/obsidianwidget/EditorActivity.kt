@@ -21,7 +21,9 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.selection.LocalTextSelectionColors
 import androidx.compose.foundation.text.selection.TextSelectionColors
@@ -47,6 +49,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -81,6 +84,8 @@ class EditorActivity : ComponentActivity() {
     private lateinit var cfg: WidgetConfig
     private var value by mutableStateOf(TextFieldValue(""))
     private var loaded by mutableStateOf(false)
+    /** Set when the cursor was put on a tapped line, until the editor has scrolled to it. */
+    private var scrollToCursor by mutableStateOf(false)
     private var conflict by mutableStateOf(false)
     /** The note as it was on disk when it was last loaded or saved. */
     private var original: String? = null
@@ -106,6 +111,7 @@ class EditorActivity : ComponentActivity() {
             val text = withContext(Dispatchers.IO) { Vault.read(this@EditorActivity, cfg.uri) }.orEmpty()
             original = text
             value = TextFieldValue(text, TextRange(cursorFor(text, line)))
+            scrollToCursor = true
             loaded = true
         }
 
@@ -119,9 +125,15 @@ class EditorActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        // A task tapped while the editor is already open: tick it in the text being edited.
-        if (intent.getBooleanExtra(EXTRA_TOGGLE, false) && loaded) {
-            Markdown.toggleTask(value.text, intent.getIntExtra(EXTRA_LINE, -1))?.let { value = value.copy(text = it) }
+        if (!loaded) return
+        val line = intent.getIntExtra(EXTRA_LINE, -1)
+        if (intent.getBooleanExtra(EXTRA_TOGGLE, false)) {
+            // A task tapped while the editor is already open: tick it in the text being edited.
+            Markdown.toggleTask(value.text, line)?.let { value = value.copy(text = it) }
+        } else if (line >= 0) {
+            // Another line tapped while the editor was still open in the background: go there.
+            value = value.copy(selection = TextRange(cursorFor(value.text, line)))
+            scrollToCursor = true
         }
     }
 
@@ -172,6 +184,8 @@ class EditorActivity : ComponentActivity() {
         val font = remember { Fonts.compose(cfg.fontFile) }
         val focus = remember { FocusRequester() }
         val noRipple = remember { MutableInteractionSource() }
+        val scroll = rememberScrollState()
+        var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
         // Restyled whenever the cursor moves to another line, so that line's markup shows.
         val active = LivePreview.activeLines(value.text, value.selection.start, value.selection.end)
         val cursor = value.selection.start
@@ -214,12 +228,15 @@ class EditorActivity : ComponentActivity() {
                     }
                 }
                 CompositionLocalProvider(LocalTextSelectionColors provides TextSelectionColors(accent, accent.copy(alpha = 0.35f))) {
+                    // Scrolled here rather than inside the field, so it can be moved to the tapped line.
                     BasicTextField(
                         value = value,
                         onValueChange = { value = LivePreview.continueList(value, it) },
                         enabled = loaded,
+                        onTextLayout = { layout = it },
                         modifier = Modifier
                             .fillMaxSize()
+                            .verticalScroll(scroll)
                             .padding(horizontal = 18.dp, vertical = 8.dp)
                             .focusRequester(focus),
                         textStyle = TextStyle(color = text, fontSize = cfg.textSize.sp, lineHeight = 1.45.em, fontFamily = font),
@@ -230,6 +247,14 @@ class EditorActivity : ComponentActivity() {
             }
         }
         LaunchedEffect(loaded) { if (loaded) focus.requestFocus() }
+        LaunchedEffect(scrollToCursor, layout) {
+            val l = layout ?: return@LaunchedEffect
+            if (!scrollToCursor || !loaded) return@LaunchedEffect
+            // A quarter of the way down, so the line stays in view once the keyboard opens.
+            val top = l.getCursorRect(value.selection.start.coerceIn(0, l.layoutInput.text.length)).top
+            scroll.scrollTo((top - scroll.viewportSize / 4).toInt().coerceAtLeast(0))
+            scrollToCursor = false
+        }
     }
 
     @Composable
