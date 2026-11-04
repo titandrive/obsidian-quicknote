@@ -4,12 +4,19 @@ import android.appwidget.AppWidgetManager
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
+import android.os.SystemClock
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -23,13 +30,12 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.selection.LocalTextSelectionColors
 import androidx.compose.foundation.text.selection.TextSelectionColors
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -45,6 +51,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
@@ -61,6 +68,7 @@ import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.concurrent.thread
@@ -85,6 +93,10 @@ class EditorActivity : ComponentActivity() {
     /** Set when the cursor was put on a tapped line, until the editor has scrolled to it. */
     private var scrollToCursor by mutableStateOf(false)
     private var conflict by mutableStateOf(false)
+    /** The conflict came from refreshing, so resolving it stays in the editor instead of closing. */
+    private var conflictOnRefresh = false
+    /** A refresh is running; the button spins. */
+    private var reloading by mutableStateOf(false)
     /** The note as it was on disk when it was last loaded or saved. */
     private var original: String? = null
     private val history = Toolbar.History()
@@ -227,8 +239,12 @@ class EditorActivity : ComponentActivity() {
                         showToolbar = !showToolbar
                         prefs().edit().putBoolean("toolbar", showToolbar).apply()
                     }
-                    // Re-reading the file would drop unsaved typing, so it only works with none.
-                    HeaderButton(R.drawable.ic_refresh, "Reload note", muted, enabled = loaded && value.text == original) { reload() }
+                    val spin by rememberInfiniteTransition(label = "refresh").animateFloat(
+                        0f, 360f, infiniteRepeatable(tween(900, easing = LinearEasing)), label = "spin",
+                    )
+                    HeaderButton(R.drawable.ic_refresh, "Reload note", muted, enabled = loaded, rotation = if (reloading) spin else 0f) {
+                        if (!reloading) reload()
+                    }
                     HeaderButton(R.drawable.ic_open, "Open in Obsidian", muted) {
                         leaveFor(Intent(Intent.ACTION_VIEW, Vault.openUri(this@EditorActivity, cfg.notePath)))
                     }
@@ -316,10 +332,13 @@ class EditorActivity : ComponentActivity() {
 
     /** A 34dp header button, the same size as the widget's. */
     @Composable
-    private fun HeaderButton(icon: Int, label: String, tint: Color, enabled: Boolean = true, size: androidx.compose.ui.unit.Dp = 18.dp, onClick: () -> Unit) {
+    private fun HeaderButton(
+        icon: Int, label: String, tint: Color, enabled: Boolean = true, size: androidx.compose.ui.unit.Dp = 18.dp,
+        rotation: Float = 0f, onClick: () -> Unit,
+    ) {
         val tick = rememberHaptic()
         IconButton(onClick = { tick(); onClick() }, enabled = enabled, modifier = Modifier.size(34.dp)) {
-            Icon(painterResource(icon), label, Modifier.size(size), tint = tint.copy(alpha = if (enabled) 1f else 0.35f))
+            Icon(painterResource(icon), label, Modifier.size(size).rotate(rotation), tint = tint.copy(alpha = if (enabled) 1f else 0.35f))
         }
     }
 
@@ -331,12 +350,28 @@ class EditorActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * Picks up changes made in Obsidian. Unsaved edits are saved first; if the note also changed
+     * elsewhere, the conflict dialog asks which to keep, and refreshing carries on from there.
+     */
     private fun reload() {
+        if (value.text != original && !save(force = false)) {
+            conflictOnRefresh = true
+            return
+        }
+        reloading = true
         lifecycleScope.launch {
-            val text = withContext(Dispatchers.IO) { Vault.read(this@EditorActivity, cfg.uri) } ?: return@launch
-            val cursor = value.selection.start.coerceAtMost(text.length)
-            original = text
-            value = TextFieldValue(text, TextRange(cursor))
+            val started = SystemClock.uptimeMillis()
+            val text = withContext(Dispatchers.IO) { Vault.read(this@EditorActivity, cfg.uri) }
+            if (text != null && text != value.text) {
+                val next = TextFieldValue(text, TextRange(value.selection.start.coerceAtMost(text.length)))
+                history.record(value, next, action = true)
+                value = next
+            }
+            if (text != null) original = text
+            // Long enough to see it turn, even when the file is read in an instant.
+            delay((600 - (SystemClock.uptimeMillis() - started)).coerceAtLeast(0))
+            reloading = false
         }
     }
 
@@ -345,14 +380,29 @@ class EditorActivity : ComponentActivity() {
     @Composable
     private fun ConflictDialog(p: Palette) {
         AlertDialog(
-            onDismissRequest = { conflict = false },
+            onDismissRequest = { conflict = false; conflictOnRefresh = false },
             title = { Text("Note changed elsewhere") },
             text = { Text("${cfg.title} was changed (probably in Obsidian or by sync) since you started editing. Keep your version?") },
             confirmButton = {
-                TextButton(onClick = { conflict = false; if (save(force = true)) finish() }) { Text("Overwrite with mine") }
+                TextButton(onClick = {
+                    conflict = false
+                    if (save(force = true) && !conflictOnRefresh) finish()
+                    conflictOnRefresh = false
+                }) { Text("Overwrite with mine") }
             },
             dismissButton = {
-                TextButton(onClick = { conflict = false; original = value.text; finish() }) { Text("Discard my edits") }
+                TextButton(onClick = {
+                    conflict = false
+                    if (conflictOnRefresh) {
+                        // Take the version on disk instead of closing.
+                        conflictOnRefresh = false
+                        original = value.text
+                        reload()
+                    } else {
+                        original = value.text
+                        finish()
+                    }
+                }) { Text("Discard my edits") }
             },
             containerColor = Color(p.backgroundAlt),
             titleContentColor = Color(p.text),
