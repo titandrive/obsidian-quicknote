@@ -236,7 +236,8 @@ object Markdown {
 
     private fun spacer(): CharSequence = SpannableStringBuilder(" ").also { span(it, 0, RelativeSizeSpan(0.5f)) }
 
-    private fun depth(lead: String): Int = lead.replace("\t", "    ").length / 2
+    /** Nesting level from leading whitespace, as Obsidian counts it: a tab, or up to 4 spaces, per level. */
+    private fun depth(lead: String): Int = lead.count { it == '\t' } + (lead.count { it == ' ' } + 3) / 4
 
     private fun indent(sb: SpannableStringBuilder, depth: Int, px: Int) {
         // Hang wrapped lines under the text, past the bullet or checkbox.

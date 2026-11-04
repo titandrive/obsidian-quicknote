@@ -12,6 +12,7 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.TransformedText
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 
 /**
@@ -77,6 +78,15 @@ class LivePreview(
             if (line.isBlank()) {
                 callout = null
                 continue
+            }
+
+            // A tab draws almost zero-width, and letter spacing doesn't apply to it. Show indenting
+            // tabs as an em space, widened to a list level as Obsidian shows them; the text keeps its tab.
+            line.takeWhile { it == ' ' || it == '\t' }.forEachIndexed { k, ch ->
+                if (ch == '\t') {
+                    shown[start + k] = '\u2003'
+                    style(SpanStyle(letterSpacing = 0.8.em), k, k + 1)
+                }
             }
 
             val quote = Markdown.QUOTE.find(line)
