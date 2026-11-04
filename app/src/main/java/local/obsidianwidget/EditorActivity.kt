@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -86,13 +87,18 @@ class EditorActivity : ComponentActivity() {
     /** The note as it was on disk when it was last loaded or saved. */
     private var original: String? = null
     private val history = Toolbar.History()
+    private var widgetId = AppWidgetManager.INVALID_APPWIDGET_ID
+    /** Whether the formatting toolbar shows; remembered between edits. */
+    private var showToolbar by mutableStateOf(true)
     /** The vault's mobile toolbar buttons, once read. */
     private var toolbar by mutableStateOf<List<Toolbar.Command>>(emptyList())
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val id = intent.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, AppWidgetManager.INVALID_APPWIDGET_ID)
+        widgetId = id
         cfg = WidgetStore.load(this, id) ?: return finish()
+        showToolbar = prefs().getBoolean("toolbar", true)
 
         enableEdgeToEdge()
         val line = intent.getIntExtra(EXTRA_LINE, -1)
@@ -171,6 +177,7 @@ class EditorActivity : ComponentActivity() {
         val bg = Color(p.background)
         val text = Color(p.text)
         val accent = Color(p.accent)
+        val muted = Color(p.muted)
         val font = remember { Fonts.compose(cfg.fontFile) }
         val focus = remember { FocusRequester() }
         val noRipple = remember { MutableInteractionSource() }
@@ -201,22 +208,33 @@ class EditorActivity : ComponentActivity() {
                     // Swallow taps on the card so they don't count as tapping outside it.
                     .clickable(interactionSource = noRipple, indication = null) {},
             ) {
-                Row(Modifier.padding(start = 18.dp, end = 4.dp, top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                // The widget's header, button for button (widget_note.xml), with done where the widget has edit.
+                Row(
+                    Modifier.padding(start = 14.dp, end = 6.dp, top = 6.dp).height(34.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
                     Text(
-                        cfg.title, Modifier.weight(1f), color = Color(p.title), fontWeight = FontWeight.Bold, fontSize = 16.sp,
+                        cfg.title, color = Color(p.title), fontWeight = FontWeight.Bold, fontSize = 15.sp,
                         fontFamily = font, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier
+                            .weight(1f)
+                            .clickable(interactionSource = noRipple, indication = null) {
+                                leaveFor(NoteWidgetProvider.configIntent(this@EditorActivity, widgetId, pickOnly = true))
+                            },
                     )
-                    IconButton(onClick = {
-                        if (value.text == original || save(force = false)) {
-                            startActivity(Intent(Intent.ACTION_VIEW, Vault.openUri(this@EditorActivity, cfg.notePath)))
-                            finish()
-                        }
-                    }) {
-                        Icon(painterResource(R.drawable.ic_open), "Open in Obsidian", Modifier.size(20.dp), tint = Color(p.muted))
+                    HeaderButton(R.drawable.ic_toolbar, if (showToolbar) "Hide toolbar" else "Show toolbar", if (showToolbar) accent else muted) {
+                        showToolbar = !showToolbar
+                        prefs().edit().putBoolean("toolbar", showToolbar).apply()
                     }
-                    IconButton(onClick = { done() }) {
-                        Icon(painterResource(R.drawable.ic_check), "Done", Modifier.size(22.dp), tint = accent)
+                    // Re-reading the file would drop unsaved typing, so it only works with none.
+                    HeaderButton(R.drawable.ic_refresh, "Reload note", muted, enabled = loaded && value.text == original) { reload() }
+                    HeaderButton(R.drawable.ic_open, "Open in Obsidian", muted) {
+                        leaveFor(Intent(Intent.ACTION_VIEW, Vault.openUri(this@EditorActivity, cfg.notePath)))
                     }
+                    HeaderButton(R.drawable.ic_settings, "Widget settings", muted) {
+                        leaveFor(NoteWidgetProvider.configIntent(this@EditorActivity, widgetId, pickOnly = false))
+                    }
+                    HeaderButton(R.drawable.ic_check, "Done", accent, size = 22.dp) { done() }
                 }
                 CompositionLocalProvider(LocalTextSelectionColors provides TextSelectionColors(accent, accent.copy(alpha = 0.35f))) {
                     // Scrolled here rather than inside the field, so it can be moved to the tapped line.
@@ -240,7 +258,7 @@ class EditorActivity : ComponentActivity() {
                         visualTransformation = preview,
                     )
                 }
-                if (toolbar.isNotEmpty()) ToolbarRow(p)
+                if (showToolbar && toolbar.isNotEmpty()) ToolbarRow(p)
             }
         }
         LaunchedEffect(loaded) { if (loaded) focus.requestFocus() }
@@ -294,6 +312,34 @@ class EditorActivity : ComponentActivity() {
             }
         }
     }
+
+    /** A 34dp header button, the same size as the widget's. */
+    @Composable
+    private fun HeaderButton(icon: Int, label: String, tint: Color, enabled: Boolean = true, size: androidx.compose.ui.unit.Dp = 18.dp, onClick: () -> Unit) {
+        val tick = rememberHaptic()
+        IconButton(onClick = { tick(); onClick() }, enabled = enabled, modifier = Modifier.size(34.dp)) {
+            Icon(painterResource(icon), label, Modifier.size(size), tint = tint.copy(alpha = if (enabled) 1f else 0.35f))
+        }
+    }
+
+    /** Saves (asking first if the note changed elsewhere), then goes to [intent] and closes. */
+    private fun leaveFor(intent: Intent) {
+        if (value.text == original || save(force = false)) {
+            startActivity(intent)
+            finish()
+        }
+    }
+
+    private fun reload() {
+        lifecycleScope.launch {
+            val text = withContext(Dispatchers.IO) { Vault.read(this@EditorActivity, cfg.uri) } ?: return@launch
+            val cursor = value.selection.start.coerceAtMost(text.length)
+            original = text
+            value = TextFieldValue(text, TextRange(cursor))
+        }
+    }
+
+    private fun prefs() = getSharedPreferences("editor", MODE_PRIVATE)
 
     @Composable
     private fun ConflictDialog(p: Palette) {

@@ -44,13 +44,6 @@
                 android:padding="8dp"
                 android:src="@drawable/ic_refresh"
                 android:contentDescription="@string/refresh" />
-            <ImageView
-                android:id="@+id/btn_edit"
-                android:layout_width="34dp"
-                android:layout_height="34dp"
-                android:padding="8dp"
-                android:src="@drawable/ic_edit"
-                android:contentDescription="@string/edit" />
 
             <ImageView
                 android:id="@+id/btn_open"
@@ -67,6 +60,14 @@
                 android:padding="8dp"
                 android:src="@drawable/ic_settings"
                 android:contentDescription="@string/settings" />
+
+            <ImageView
+                android:id="@+id/btn_edit"
+                android:layout_width="34dp"
+                android:layout_height="34dp"
+                android:padding="8dp"
+                android:src="@drawable/ic_edit"
+                android:contentDescription="@string/edit" />
         </LinearLayout>
 
         <FrameLayout
