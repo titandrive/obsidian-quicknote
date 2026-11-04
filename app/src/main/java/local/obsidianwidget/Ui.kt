@@ -50,12 +50,17 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
@@ -64,6 +69,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 
@@ -341,8 +347,14 @@ fun <T> PickerSheet(
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         containerColor = MaterialTheme.colorScheme.surfaceVariant,
     ) {
-        // The title fixed, the options scrolling below it, and the sheet kept short of full height:
-        // a full-height sheet passed the end of the list's scroll on to itself and bounced.
+        // The title fixed, the options scrolling below it. The list keeps whatever scroll or fling
+        // is left over at its ends: passed on, it moved the sheet, which snapped back, so it bounced.
+        val keepScroll = remember {
+            object : NestedScrollConnection {
+                override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource) = available
+                override suspend fun onPostFling(consumed: Velocity, available: Velocity) = available
+            }
+        }
         val maxHeight = (LocalConfiguration.current.screenHeightDp * 0.75f).dp
         Column(Modifier.heightIn(max = maxHeight).padding(horizontal = 16.dp)) {
             Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 4.dp, bottom = 8.dp))
@@ -350,6 +362,7 @@ fun <T> PickerSheet(
                 verticalArrangement = Arrangement.spacedBy(4.dp),
                 modifier = Modifier
                     .weight(1f, fill = false)
+                    .nestedScroll(keepScroll)
                     .verticalScroll(rememberScrollState())
                     .padding(bottom = 24.dp),
             ) {
