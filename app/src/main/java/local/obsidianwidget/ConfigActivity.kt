@@ -71,7 +71,7 @@ class ConfigActivity : ComponentActivity() {
         const val EXTRA_PICK_ONLY = "pick_only"
 
         private val MODES = listOf("vault", "system", "light", "dark")
-        private val OPACITIES = listOf(100, 85, 70, 50, 25, 0)
+        private val OPACITIES = listOf(0, 25, 50, 70, 85, 100)
         private val TEXT_SIZES = listOf(12f, 13f, 14f, 16f, 18f)
     }
 
