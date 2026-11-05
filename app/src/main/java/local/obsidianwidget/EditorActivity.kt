@@ -290,6 +290,13 @@ class EditorActivity : ComponentActivity() {
                                 leaveFor(NoteWidgetProvider.configIntent(this@EditorActivity, widgetId, pickOnly = true))
                             },
                     )
+                    if (!readOnly) HeaderButton(R.drawable.ic_toolbar, if (showToolbar) "Hide toolbar" else "Show toolbar", if (showToolbar) accent else muted) {
+                        showToolbar = !showToolbar
+                        // Saved onto the widget's latest settings, which may have changed since opening.
+                        WidgetStore.load(this@EditorActivity, widgetId)?.let {
+                            WidgetStore.save(this@EditorActivity, widgetId, it.copy(showToolbar = showToolbar))
+                        }
+                    }
                     HeaderButton(R.drawable.ic_read, if (readOnly) "Edit" else "Reading mode", if (readOnly) accent else muted) {
                         readOnly = !readOnly
                         if (readOnly) focusManager.clearFocus() else focus.requestFocus()
@@ -297,13 +304,6 @@ class EditorActivity : ComponentActivity() {
                         WidgetStore.load(this@EditorActivity, widgetId)?.takeIf { it.readOnlyPopup }?.let {
                             WidgetStore.save(this@EditorActivity, widgetId, it.copy(readOnly = readOnly))
                             NoteWidgetProvider.refreshNote(this@EditorActivity, cfg.noteUri)
-                        }
-                    }
-                    if (!readOnly) HeaderButton(R.drawable.ic_toolbar, if (showToolbar) "Hide toolbar" else "Show toolbar", if (showToolbar) accent else muted) {
-                        showToolbar = !showToolbar
-                        // Saved onto the widget's latest settings, which may have changed since opening.
-                        WidgetStore.load(this@EditorActivity, widgetId)?.let {
-                            WidgetStore.save(this@EditorActivity, widgetId, it.copy(showToolbar = showToolbar))
                         }
                     }
                     val spin by rememberInfiniteTransition(label = "refresh").animateFloat(
