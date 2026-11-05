@@ -128,6 +128,7 @@ class ConfigActivity : ComponentActivity() {
         var opacity by remember { mutableIntStateOf(existing?.opacity ?: 100) }
         var textSize by remember { mutableStateOf(existing?.textSize ?: 14f) }
         var showHeader by remember { mutableStateOf(existing?.showHeader ?: true) }
+        var readOnlyPopup by remember { mutableStateOf(existing?.readOnlyPopup ?: false) }
         var checkMinutes by remember { mutableIntStateOf(existing?.checkMinutes ?: 30) }
         var colors by remember { mutableStateOf(existing?.colors) }
         var noteText by remember { mutableStateOf<String?>(null) }
@@ -185,6 +186,7 @@ class ConfigActivity : ComponentActivity() {
             opacity = opacity, textSize = textSize, colors = colors, showHeader = showHeader,
             vault = vault.orEmpty(), vaultName = vaultName.orEmpty(), checkMinutes = checkMinutes,
             showToolbar = existing?.showToolbar ?: true,
+            readOnly = existing?.readOnly ?: false, readOnlyPopup = readOnlyPopup,
         )
         val cfg = current()
 
@@ -302,6 +304,11 @@ class ConfigActivity : ComponentActivity() {
                             SettingLabel("Text size", value = "${textSize.toInt()}")
                             StepSlider(textSize.toInt(), 10..19, step = 1) { textSize = it.toFloat() }
                             SwitchRow("Show header", null, showHeader) { showHeader = it }
+                            SwitchRow(
+                                "Reading mode in the popup too",
+                                if (readOnlyPopup) "The book button makes the widget and its popup read-only" else "The book button makes only the widget read-only",
+                                readOnlyPopup,
+                            ) { readOnlyPopup = it }
                         }
 
                         SectionCard("Updates", R.drawable.ic_refresh) {

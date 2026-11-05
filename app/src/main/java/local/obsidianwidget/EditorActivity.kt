@@ -119,7 +119,7 @@ class EditorActivity : ComponentActivity() {
     private var savedFolds: Set<Int> = emptySet()
     /** Whether the formatting toolbar shows; remembered per widget. */
     private var showToolbar by mutableStateOf(true)
-    /** Reading mode: everything rendered, no keyboard, folding only; shared with the widget. */
+    /** Reading mode: everything rendered, no keyboard, folding only; shared with the widget if it is set to cover the popup. */
     private var readOnly by mutableStateOf(false)
     /** The vault's mobile toolbar buttons, once read. */
     private var toolbar by mutableStateOf<List<Toolbar.Command>>(emptyList())
@@ -130,7 +130,8 @@ class EditorActivity : ComponentActivity() {
         widgetId = id
         cfg = WidgetStore.load(this, id) ?: return finish()
         showToolbar = cfg.showToolbar
-        readOnly = cfg.readOnly
+        // Reading mode on the widget carries over to the popup only if the widget's set up that way.
+        readOnly = cfg.readOnly && cfg.readOnlyPopup
 
         enableEdgeToEdge()
         val line = intent.getIntExtra(EXTRA_LINE, -1)
@@ -292,10 +293,11 @@ class EditorActivity : ComponentActivity() {
                     HeaderButton(R.drawable.ic_read, if (readOnly) "Edit" else "Reading mode", if (readOnly) accent else muted) {
                         readOnly = !readOnly
                         if (readOnly) focusManager.clearFocus() else focus.requestFocus()
-                        WidgetStore.load(this@EditorActivity, widgetId)?.let {
+                        // Shared with the widget when reading mode covers both; otherwise just this popup.
+                        WidgetStore.load(this@EditorActivity, widgetId)?.takeIf { it.readOnlyPopup }?.let {
                             WidgetStore.save(this@EditorActivity, widgetId, it.copy(readOnly = readOnly))
+                            NoteWidgetProvider.refreshNote(this@EditorActivity, cfg.noteUri)
                         }
-                        NoteWidgetProvider.refreshNote(this@EditorActivity, cfg.noteUri)
                     }
                     if (!readOnly) HeaderButton(R.drawable.ic_toolbar, if (showToolbar) "Hide toolbar" else "Show toolbar", if (showToolbar) accent else muted) {
                         showToolbar = !showToolbar
