@@ -216,7 +216,8 @@ class EditorActivity : ComponentActivity() {
     }
 
     private fun cursorFor(text: String, line: Int): Int {
-        if (line < 0) return text.length
+        // No line (the edit button): the top of the note.
+        if (line < 0) return 0
         var offset = 0
         repeat(line) {
             val nl = text.indexOf('\n', offset)
