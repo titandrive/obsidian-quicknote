@@ -145,7 +145,10 @@ object NoteRows {
             // An arrow can straddle two strips (big headings put it on the border), so each strip it
             // overlaps draws its part. Every strip beside the foldable line's first row of text takes
             // taps for it, so a big heading's arrow is as easy to hit as its text is tall.
+            // When two lines' rows both reach into a strip (a big heading's spills into the next
+            // line's), the strip goes to the one covering more of it.
             var fold: Piece? = null
+            var foldOverlap = 0
             val r = dp(ctx, 4)
             for (piece in pieces) {
                 if (piece.block.fold == Block.NONE) continue
@@ -154,7 +157,11 @@ object NoteRows {
                     drawArrow(canvas, -gutter / 2f, y.toFloat(), r.toFloat(), piece.block.fold == Block.FOLDED, arrow)
                 }
                 val (rowTop, rowBottom) = firstRow(piece)
-                if (rowBottom > top && rowTop < top + strip) fold = piece
+                val overlap = minOf(rowBottom, top + strip) - maxOf(rowTop, top)
+                if (overlap > foldOverlap) {
+                    fold = piece
+                    foldOverlap = overlap
+                }
             }
             // Taps go to the block under the strip's middle.
             val mid = top + strip / 2
