@@ -126,9 +126,9 @@ class LivePreview(
                     TABLE_RULE.matches(line) -> style(faint)
                     !table -> {
                         style(SpanStyle(fontWeight = FontWeight.Bold, color = Color(p.headings[0])))
-                        inline(b, line, 0, 0, line.length, on)
+                        inline(b, line, 0, 0, line.length, cursorCol)
                     }
-                    else -> inline(b, line, 0, 0, line.length, on)
+                    else -> inline(b, line, 0, 0, line.length, cursorCol)
                 }
                 line.forEachIndexed { k, ch -> if (ch == '|') style(SpanStyle(color = Color(p.faint)), k, k + 1) }
                 table = true
@@ -179,7 +179,7 @@ class LivePreview(
                     }
                 } else {
                     style(SpanStyle(color = if (callout != null) Color(p.text) else Color(p.muted)), innerStart)
-                    inline(b, line, 0, innerStart, line.length, on)
+                    inline(b, line, 0, innerStart, line.length, cursorCol)
                 }
             }
             Markdown.RULE.matches(line) -> {
@@ -196,7 +196,7 @@ class LivePreview(
                     color = Color(p.headings[level - 1]),
                 ))
                 markup(0, textStart)
-                inline(b, line, 0, textStart, line.length, on)
+                inline(b, line, 0, textStart, line.length, cursorCol)
             }
             Markdown.TASK.matches(line) -> {
                 val m = Markdown.TASK.find(line)!!
@@ -221,7 +221,7 @@ class LivePreview(
                 if (m.groupValues[2] in setOf("x", "X", "-")) {
                     style(SpanStyle(color = Color(p.faint), textDecoration = TextDecoration.LineThrough), content)
                 }
-                inline(b, line, 0, content, line.length, on)
+                inline(b, line, 0, content, line.length, cursorCol)
             }
             Markdown.BULLET.matches(line) || Markdown.NUMBERED.matches(line) -> {
                 val bullet = Markdown.BULLET.find(line)
@@ -230,15 +230,20 @@ class LivePreview(
                 val marker = m.groups[1]!!.range.last + 1
                 style(SpanStyle(color = Color(p.marker), fontWeight = FontWeight.Bold), marker, content)
                 if (bullet != null && !editing(marker, marker + 1)) shown[marker] = '•'
-                inline(b, line, 0, content, line.length, on)
+                inline(b, line, 0, content, line.length, cursorCol)
             }
-            else -> inline(b, line, 0, 0, line.length, on)
+            else -> inline(b, line, 0, 0, line.length, cursorCol)
         }
         return done()
     }
 
-    /** Styles bold, links, tags and the rest within [from, to) of [line], which starts at [base] in the text. */
-    private fun inline(b: AnnotatedString.Builder, line: String, base: Int, from: Int, to: Int, on: Boolean) {
+    /**
+     * Styles bold, links, tags and the rest within [from, to) of [line], which starts at [base] in
+     * the text. As in Obsidian, an element's markup ("**", "==", "[[") shows only while the cursor
+     * ([cursorCol], or -1 off this line) is in it or at its edge; otherwise it's hidden, even on
+     * the cursor's own line.
+     */
+    private fun inline(b: AnnotatedString.Builder, line: String, base: Int, from: Int, to: Int, cursorCol: Int) {
         if (to <= from) return
         val part = line.substring(from, to)
         for (m in Markdown.INLINE.findAll(part)) {
@@ -247,13 +252,15 @@ class LivePreview(
             val t = m.value
             val g = m.groups
             fun add(style: SpanStyle, a: Int, z: Int) { if (z > a) b.addStyle(style, a, z) }
-            fun markup(a: Int, z: Int) = add(if (on) faint else hidden, a, z)
+            // In the element, start and end included, so the markup shows while typing right after it.
+            val editingThis = cursorCol in (s - base)..(e - base)
+            fun markup(a: Int, z: Int) = add(if (editingThis) faint else hidden, a, z)
             /** Marks [open] and [close] chars at each end as markup and styles what's between. */
             fun wrap(open: Int, close: Int, style: SpanStyle, recurse: Boolean = true) {
                 markup(s, s + open)
                 markup(e - close, e)
                 add(style, s + open, e - close)
-                if (recurse) inline(b, line, base, from + m.range.first + open, from + m.range.last + 1 - close, on)
+                if (recurse) inline(b, line, base, from + m.range.first + open, from + m.range.last + 1 - close, cursorCol)
             }
             when {
                 g["code"] != null -> wrap(1, 1, code, recurse = false)
