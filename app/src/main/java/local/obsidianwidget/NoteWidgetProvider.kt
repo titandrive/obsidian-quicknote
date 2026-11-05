@@ -174,13 +174,23 @@ class NoteWidgetProvider : AppWidgetProvider() {
             // scrolling (fetching showed placeholders that jumped to the real rows' heights).
             val rows = if (android.os.Build.VERSION.SDK_INT >= 31) NoteRows.build(ctx, id) else null
             val inline = rows != null && rows.rows.sumOf { it.image.size } + rows.night.orEmpty().sumOf { it.image.size } < INLINE_LIMIT
+            val routes = ctx.getSharedPreferences("routes", Context.MODE_PRIVATE)
+            val wasInline = routes.getBoolean("inline$id", false)
             if (inline && android.os.Build.VERSION.SDK_INT >= 31) {
                 val items = RemoteViews.RemoteCollectionItems.Builder().setHasStableIds(true).setViewTypeCount(1)
                 rows!!.rows.forEachIndexed { i, row -> items.addItem(i.toLong(), NoteRows.view(ctx, row, rows.night?.getOrNull(i))) }
                 views.setRemoteAdapter(R.id.list, items.build())
+                routes.edit().putBoolean("inline$id", true).apply()
             } else {
+                // A list that went from fetching rows to being handed them, and back, takes the same
+                // service intent as "already connected" and keeps showing the handed-over rows (say,
+                // a folded note after unfolding it). Each switch back gets a fresh intent.
+                var round = routes.getInt("round$id", 0)
+                if (wasInline) round++
+                routes.edit().putBoolean("inline$id", false).putInt("round$id", round).apply()
                 val service = Intent(ctx, NoteListService::class.java)
                     .putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, id)
+                    .putExtra("round", round)
                 // A unique data URI per widget, or the launcher reuses one widget's list for another.
                 service.data = Uri.parse(service.toUri(Intent.URI_INTENT_SCHEME))
                 @Suppress("DEPRECATION")
