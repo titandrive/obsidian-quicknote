@@ -12,10 +12,13 @@
         android:adjustViewBounds="true"
         android:scaleType="fitStart" />
 
-    <!-- Over the gutter beside a fold arrow: tapping it folds or unfolds instead of editing. -->
+    <!--
+        Over the gutter beside a fold arrow, and the start of the line: tapping it folds or unfolds
+        instead of editing. 48dp, the size Android recommends for touch targets.
+    -->
     <ImageView
         android:id="@+id/fold_hit"
-        android:layout_width="24dp"
+        android:layout_width="48dp"
         android:layout_height="match_parent"
         android:layout_gravity="start"
         android:visibility="gone" />

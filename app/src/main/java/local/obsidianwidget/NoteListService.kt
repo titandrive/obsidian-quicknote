@@ -143,15 +143,18 @@ object NoteRows {
             }
             // Fold arrows in the gutter, beside each foldable line's first line of text.
             // An arrow can straddle two strips (big headings put it on the border), so each strip it
-            // overlaps draws its part; taps go to the strip holding its middle.
+            // overlaps draws its part. Every strip beside the foldable line's first row of text takes
+            // taps for it, so a big heading's arrow is as easy to hit as its text is tall.
             var fold: Piece? = null
             val r = dp(ctx, 4)
             for (piece in pieces) {
                 if (piece.block.fold == Block.NONE) continue
                 val y = arrowY(piece)
-                if (y + r < top || y - r >= top + strip) continue
-                drawArrow(canvas, -gutter / 2f, y.toFloat(), r.toFloat(), piece.block.fold == Block.FOLDED, arrow)
-                if (y in top until top + strip) fold = piece
+                if (y + r >= top && y - r < top + strip) {
+                    drawArrow(canvas, -gutter / 2f, y.toFloat(), r.toFloat(), piece.block.fold == Block.FOLDED, arrow)
+                }
+                val (rowTop, rowBottom) = firstRow(piece)
+                if (rowBottom > top && rowTop < top + strip) fold = piece
             }
             // Taps go to the block under the strip's middle.
             val mid = top + strip / 2
@@ -162,6 +165,12 @@ object NoteRows {
             )
         }
         return rows
+    }
+
+    /** The top and bottom of a block's first row of text on the note's canvas. */
+    private fun firstRow(piece: Piece): Pair<Int, Int> {
+        val l = piece.layout ?: return piece.top to piece.top + piece.height
+        return piece.top + l.getLineTop(0) to piece.top + l.getLineBottom(0)
     }
 
     /** Where a foldable block's arrow goes: level with the middle of its first line. */
