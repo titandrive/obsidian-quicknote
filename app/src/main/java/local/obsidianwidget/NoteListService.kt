@@ -52,14 +52,34 @@ object NoteRows {
     /** Whether the widget carries both a light and a dark look, for the launcher to switch between. */
     fun dayAndNight(cfg: WidgetConfig) = cfg.followsSystem && android.os.Build.VERSION.SDK_INT >= 31
 
-    /** The note's rows, or null if the widget isn't set up. */
-    fun build(ctx: Context, id: Int): Built? {
-        val cfg = WidgetStore.load(ctx, id) ?: return null
+    /** The note's rows, or null if the widget isn't set up; with [unfolded], ignoring folds. */
+    fun build(ctx: Context, id: Int, unfolded: Boolean = false): Built? = build(ctx, id, unfolded, null)
+
+    /**
+     * How big widget [id]'s rows are with nothing folded, which decides how they reach the
+     * launcher, so folding never switches that. Remembered per note, so a fold doesn't draw the
+     * whole note again just to measure it.
+     */
+    fun wholeSize(ctx: Context, id: Int): Int {
+        val cfg = WidgetStore.load(ctx, id) ?: return Int.MAX_VALUE
         val text = Vault.read(ctx, cfg.uri)
+        val width = (TextBitmaps.widgetWidth(ctx, id) - dp(ctx, 14 + 6 + 8)).coerceAtLeast(1)
+        val key = cacheKey(ctx, cfg, text, width, false)
+        val memo = ctx.getSharedPreferences("routes", Context.MODE_PRIVATE)
+        if (memo.getString("sizeKey$id", null) == key) return memo.getInt("size$id", Int.MAX_VALUE)
+        val whole = build(ctx, id, true, text) ?: return Int.MAX_VALUE
+        val size = whole.rows.sumOf { it.image.size } + whole.night.orEmpty().sumOf { it.image.size }
+        memo.edit().putString("sizeKey$id", key).putInt("size$id", size).apply()
+        return size
+    }
+
+    private fun build(ctx: Context, id: Int, unfolded: Boolean, known: String?): Built? {
+        val cfg = WidgetStore.load(ctx, id) ?: return null
+        val text = known ?: Vault.read(ctx, cfg.uri)
         // The list's width: the widget minus its side padding.
         val width = (TextBitmaps.widgetWidth(ctx, id) - dp(ctx, 14 + 6 + 8)).coerceAtLeast(1)
         val regions = text?.let(Folds::regions).orEmpty()
-        val folded = text?.let { Folds.folded(ctx, id, it) }.orEmpty()
+        val folded = if (unfolded) emptySet() else text?.let { Folds.folded(ctx, id, it) }.orEmpty()
         fun rows(dark: Boolean): List<Row> {
             val key = cacheKey(ctx, cfg, text, width, dark) + "|" + folded.sorted()
             return cached(ctx, id, dark, key)
@@ -366,6 +386,41 @@ object NoteRows {
         }
     }
 
+    /**
+     * Stable ids from what each row shows, so rows that didn't change (say, everything above a
+     * fold just toggled) keep their id and the launcher can keep them rather than reload them.
+     * Identical rows (blank lines) are told apart by how many came before.
+     */
+    fun ids(rows: List<Row>): LongArray {
+        val seen = HashMap<Int, Int>()
+        return LongArray(rows.size) { i ->
+            val r = rows[i]
+            val hash = 31 * r.image.contentHashCode() + r.fold * 2 + (if (r.folded) 1 else 0)
+            val n = seen.merge(hash, 1, Int::plus)!!
+            (hash.toLong() shl 20) xor n.toLong()
+        }
+    }
+
+    /**
+     * A see-through stand-in for rows still loading, the same height as a real one, in place of
+     * Android's "Loading…" text, which flashed down the side of the list after a fold.
+     */
+    fun placeholder(ctx: Context, row: Row?): RemoteViews {
+        val views = RemoteViews(ctx.packageName, R.layout.widget_item)
+        val size = row?.let {
+            android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                .also { o -> android.graphics.BitmapFactory.decodeByteArray(it.image, 0, it.image.size, o) }
+        }
+        if (size != null && size.outWidth > 0) {
+            // Same shape as a strip, so it scales to exactly a strip's height; small, since it's empty.
+            val scale = 8
+            val bmp = Bitmap.createBitmap(maxOf(1, size.outWidth / scale), maxOf(1, size.outHeight / scale), Bitmap.Config.ALPHA_8)
+            views.setImageViewBitmap(R.id.item_img, bmp)
+        }
+        views.setViewVisibility(R.id.fold_hit, android.view.View.GONE)
+        return views
+    }
+
     /** Lossless WebP where available (about half the size of PNG for text). */
     private fun compress(bmp: Bitmap): ByteArray = ByteArrayOutputStream().use { out ->
         val format = if (android.os.Build.VERSION.SDK_INT >= 30) Bitmap.CompressFormat.WEBP_LOSSLESS else Bitmap.CompressFormat.PNG
@@ -385,11 +440,13 @@ class NoteListService : RemoteViewsService() {
     private class Factory(val ctx: Context, val id: Int) : RemoteViewsFactory {
         private var rows: List<NoteRows.Row> = emptyList()
         private var night: List<NoteRows.Row>? = null
+        private var ids = LongArray(0)
 
         override fun onDataSetChanged() {
             val built = NoteRows.build(ctx, id)
             rows = built?.rows.orEmpty()
             night = built?.night
+            ids = NoteRows.ids(rows)
         }
 
         override fun getViewAt(position: Int): RemoteViews =
@@ -397,10 +454,9 @@ class NoteListService : RemoteViewsService() {
                 ?: RemoteViews(ctx.packageName, R.layout.widget_item)
 
         override fun getCount() = rows.size
-        override fun getLoadingView(): RemoteViews? = null
+        override fun getLoadingView(): RemoteViews = NoteRows.placeholder(ctx, rows.firstOrNull())
         override fun getViewTypeCount() = 1
-        override fun getItemId(position: Int) = position.toLong()
-        // Rows only change when the note does, which resets the whole list.
+        override fun getItemId(position: Int) = ids.getOrElse(position) { position.toLong() }
         override fun hasStableIds() = true
         override fun onCreate() = Unit
         override fun onDestroy() = Unit

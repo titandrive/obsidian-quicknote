@@ -173,12 +173,15 @@ class NoteWidgetProvider : AppWidgetProvider() {
             // On Android 12+ every row goes with the widget, so the launcher never fetches rows while
             // scrolling (fetching showed placeholders that jumped to the real rows' heights).
             val rows = if (android.os.Build.VERSION.SDK_INT >= 31) NoteRows.build(ctx, id) else null
-            val inline = rows != null && rows.rows.sumOf { it.image.size } + rows.night.orEmpty().sumOf { it.image.size } < INLINE_LIMIT
+            // Which route is decided by the whole note, unfolded, so folding never switches it: a
+            // switch rebuilt the list, which showed "Empty note" for a moment before the rows came.
+            val inline = rows != null && NoteRows.wholeSize(ctx, id) < INLINE_LIMIT
             val routes = ctx.getSharedPreferences("routes", Context.MODE_PRIVATE)
             val wasInline = routes.getBoolean("inline$id", false)
             if (inline && android.os.Build.VERSION.SDK_INT >= 31) {
                 val items = RemoteViews.RemoteCollectionItems.Builder().setHasStableIds(true).setViewTypeCount(1)
-                rows!!.rows.forEachIndexed { i, row -> items.addItem(i.toLong(), NoteRows.view(ctx, row, rows.night?.getOrNull(i))) }
+                val ids = NoteRows.ids(rows!!.rows)
+                rows.rows.forEachIndexed { i, row -> items.addItem(ids[i], NoteRows.view(ctx, row, rows.night?.getOrNull(i))) }
                 views.setRemoteAdapter(R.id.list, items.build())
                 routes.edit().putBoolean("inline$id", true).apply()
             } else {
