@@ -457,7 +457,8 @@ class NoteListService : RemoteViewsService() {
         override fun getLoadingView(): RemoteViews = NoteRows.placeholder(ctx, rows.firstOrNull())
         override fun getViewTypeCount() = 1
         override fun getItemId(position: Int) = ids.getOrElse(position) { position.toLong() }
-        override fun hasStableIds() = true
+        // Stable ids made the list show rows from further down for a frame after a fold.
+        override fun hasStableIds() = false
         override fun onCreate() = Unit
         override fun onDestroy() = Unit
     }
