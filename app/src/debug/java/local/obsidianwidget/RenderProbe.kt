@@ -20,10 +20,12 @@ class RenderProbe : BroadcastReceiver() {
                     return@thread
                 }
                 val id = intent.getIntExtra("id", 0)
-                val rows = NoteRows.renderForProbe(ctx, id, File(ctx.filesDir, "probe.md").readText())
+                // "widget": the widget's own rows (its note and folds); otherwise files/probe.md.
+                val rows = if (intent.getBooleanExtra("widget", false)) NoteRows.build(ctx, id)!!.rows
+                else NoteRows.renderForProbe(ctx, id, File(ctx.filesDir, "probe.md").readText())
                 val dir = File(ctx.cacheDir, "probe").apply { deleteRecursively(); mkdirs() }
                 rows.forEachIndexed { i, r -> File(dir, "%03d.webp".format(i)).writeBytes(r.image) }
-                File(dir, "spoken.txt").writeText(rows.mapIndexed { i, r -> "$i\t${r.line}\t${r.text ?: ""}" }.joinToString("\n"))
+                File(dir, "spoken.txt").writeText(rows.mapIndexed { i, r -> "$i\t${r.line}\tfold=${r.fold}${if (r.folded) "+" else ""}\t${r.text ?: ""}" }.joinToString("\n"))
             } finally {
                 result.finish()
             }

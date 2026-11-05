@@ -8,14 +8,17 @@ import kotlin.concurrent.thread
 
 /**
  * Where every tap on the widget lands. It draws no window (Theme.NoDisplay): it gives the light tick
- * a widget can't give by itself, then does what was tapped: ticks a task, opens the editor at a line, refreshes,
- * or starts the screen in [EXTRA_FORWARD] (settings, Obsidian, the note chooser).
+ * a widget can't give by itself, then does what was tapped: folds or unfolds, ticks a task, opens
+ * the editor at a line, refreshes, or starts the screen in [EXTRA_FORWARD] (settings, Obsidian,
+ * the note chooser).
  */
 class TapActivity : Activity() {
     companion object {
         /** The activity to start after the tick. */
         const val EXTRA_FORWARD = "forward"
         const val EXTRA_REFRESH = "refresh"
+        /** The line of a fold arrow that was tapped. */
+        const val EXTRA_FOLD = "fold"
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -24,7 +27,17 @@ class TapActivity : Activity() {
         val id = intent.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, AppWidgetManager.INVALID_APPWIDGET_ID)
         @Suppress("DEPRECATION")
         val forward = intent.getParcelableExtra<Intent>(EXTRA_FORWARD)
+        val fold = intent.getIntExtra(EXTRA_FOLD, -1)
         when {
+            fold >= 0 -> {
+                val app = applicationContext
+                thread {
+                    val cfg = WidgetStore.load(app, id) ?: return@thread
+                    val text = Vault.read(app, cfg.uri) ?: return@thread
+                    Folds.toggle(app, id, text, fold)
+                    NoteWidgetProvider.update(app, android.appwidget.AppWidgetManager.getInstance(app), id)
+                }
+            }
             forward != null -> runCatching { startActivity(forward) }
             intent.getBooleanExtra(EXTRA_REFRESH, false) -> sendBroadcast(
                 Intent(this, NoteWidgetProvider::class.java).setAction(NoteWidgetProvider.ACTION_REFRESH)

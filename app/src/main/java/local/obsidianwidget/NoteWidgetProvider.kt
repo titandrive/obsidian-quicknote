@@ -34,6 +34,7 @@ class NoteWidgetProvider : AppWidgetProvider() {
             WidgetStore.delete(ctx, id)
             NoteRows.forget(ctx, id)
             ChangeCheck.cancel(ctx, id)
+            Folds.forget(ctx, id)
         }
     }
 

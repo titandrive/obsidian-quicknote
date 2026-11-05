@@ -26,7 +26,15 @@ class Block(
     val rule: Boolean = false,
     /** A table: rows of styled cells, the header first. [text] then holds a plain fallback. */
     val table: Table? = null,
-)
+    /** [NONE], or a foldable line, [OPEN] or [FOLDED]. */
+    val fold: Int = NONE,
+) {
+    companion object {
+        const val NONE = 0
+        const val OPEN = 1
+        const val FOLDED = 2
+    }
+}
 
 /** A markdown table: [rows] of cells (the first is the header), and each column's alignment. */
 class Table(val rows: List<List<CharSequence>>, val align: List<Layout.Alignment>)
@@ -60,10 +68,20 @@ object Markdown {
     )
 
     /** [indentPx] is how far one nesting level of a list is pushed in. */
-    fun render(src: String, p: Palette, indentPx: Int): List<Block> {
+    /**
+     * [regions] are the note's foldable regions, of which [folded] are folded: their lines
+     * after the first are left out, and the first gets a fold marker (and "…" when folded).
+     */
+    fun render(
+        src: String, p: Palette, indentPx: Int,
+        regions: Map<Int, Folds.Region> = emptyMap(), folded: Set<Int> = emptySet(),
+    ): List<Block> {
         val lines = src.split('\n').map { it.removeSuffix("\r") }
         val out = ArrayList<Block>()
         var i = 0
+        val hidden = BooleanArray(lines.size).also { h ->
+            for (from in folded) regions[from]?.let { r -> for (l in r.from + 1..minOf(r.to, lines.size - 1)) h[l] = true }
+        }
 
         // Front matter isn't shown in reading view either.
         if (lines.firstOrNull()?.trim() == "---") {
@@ -73,6 +91,10 @@ object Markdown {
 
         var calloutColor: Int? = null
         while (i < lines.size) {
+            if (hidden[i]) {
+                i++
+                continue
+            }
             val line = lines[i]
             val trimmed = line.trim()
 
@@ -200,7 +222,19 @@ object Markdown {
         }
         // Drop trailing spacers so the note doesn't end in a gap.
         while (out.isNotEmpty() && out.last().text.isBlank() && !out.last().rule) out.removeAt(out.lastIndex)
-        return out
+        if (regions.isEmpty()) return out
+        // Mark each foldable line's (first) block; a folded one ends in "…", as in Obsidian.
+        val marked = HashSet<Int>()
+        return out.map { b ->
+            if (b.line !in regions || !marked.add(b.line) || b.table != null || b.code) return@map b
+            val isFolded = b.line in folded
+            val text = if (!isFolded) b.text else SpannableStringBuilder(b.text).also {
+                val start = it.length
+                it.append("  …")
+                it.setSpan(ForegroundColorSpan(p.faint), start, it.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            }
+            Block(text, b.line, b.task, b.code, b.rule, b.table, if (isFolded) Block.FOLDED else Block.OPEN)
+        }
     }
 
     fun inline(s: String, p: Palette): SpannableStringBuilder {

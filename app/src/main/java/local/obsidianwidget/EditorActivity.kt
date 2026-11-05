@@ -16,6 +16,9 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
@@ -51,11 +54,17 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextRange
@@ -101,6 +110,8 @@ class EditorActivity : ComponentActivity() {
     private var original: String? = null
     private val history = Toolbar.History()
     private var widgetId = AppWidgetManager.INVALID_APPWIDGET_ID
+    /** Folded regions, by start line of the text being edited; saved with the note. */
+    private var folded by mutableStateOf<Set<Int>>(emptySet())
     /** Whether the formatting toolbar shows; remembered per widget. */
     private var showToolbar by mutableStateOf(true)
     /** The vault's mobile toolbar buttons, once read. */
@@ -119,6 +130,9 @@ class EditorActivity : ComponentActivity() {
         lifecycleScope.launch {
             val text = withContext(Dispatchers.IO) { Vault.read(this@EditorActivity, cfg.uri) }.orEmpty()
             original = text
+            folded = withContext(Dispatchers.IO) { Folds.folded(this@EditorActivity, widgetId, text) }
+                // A tapped line inside a fold opens it, as in Obsidian.
+                .let { f -> if (line >= 0) f.filterNot { from -> Folds.regions(text)[from]?.let { line in it.from + 1..it.to } == true }.toSet() else f }
             value = TextFieldValue(text, TextRange(cursorFor(text, line)))
             scrollToCursor = true
             loaded = true
@@ -164,7 +178,10 @@ class EditorActivity : ComponentActivity() {
             conflict = true
             return false
         }
-        runCatching { Vault.write(this, cfg.uri, text) }.onFailure {
+        runCatching { Vault.write(this, cfg.uri, text) }.onSuccess {
+            // The folds as they are in the text just saved.
+            Folds.set(this, widgetId, text, folded)
+        }.onFailure {
             android.widget.Toast.makeText(this, "Couldn't save: ${it.message}", android.widget.Toast.LENGTH_LONG).show()
             return false
         }
@@ -199,7 +216,13 @@ class EditorActivity : ComponentActivity() {
         // Restyled whenever the cursor moves to another line, so that line's markup shows.
         val active = LivePreview.activeLines(value.text, value.selection.start, value.selection.end)
         val cursor = value.selection.start
-        val preview = remember(active, cursor) { LivePreview(p, cfg.textSize, active, cursor) }
+        val regions = remember(value.text) { Folds.regions(value.text) }
+        val collapsed = remember(value.text, folded) { Folds.hiddenLines(value.text, folded, regions) }
+        val preview = remember(active, cursor, collapsed) { LivePreview(p, cfg.textSize, active, cursor, collapsed) }
+        val density = LocalDensity.current
+        val gutter = with(density) { 22.dp.toPx() }
+        val tick = rememberHaptic()
+        val padTop = with(density) { 8.dp.toPx() }
 
         Box(
             Modifier
@@ -263,6 +286,10 @@ class EditorActivity : ComponentActivity() {
                         onValueChange = {
                             val next = LivePreview.continueList(value, it)
                             history.record(value, next)
+                            // Folds follow their lines when lines are added or removed above them.
+                            if (next.text.count { c -> c == '\n' } != value.text.count { c -> c == '\n' }) {
+                                folded = Folds.moved(folded, value.text, next.text)
+                            }
                             value = next
                         },
                         enabled = loaded,
@@ -271,7 +298,36 @@ class EditorActivity : ComponentActivity() {
                             .fillMaxWidth()
                             .weight(1f)
                             .verticalScroll(scroll)
-                            .padding(horizontal = 18.dp, vertical = 8.dp)
+                            // Fold arrows in a gutter at the left, as in Obsidian.
+                            .drawBehind {
+                                val l = layout ?: return@drawBehind
+                                val text = value.text
+                                for ((from, _) in regions) {
+                                    if (from in collapsed) continue
+                                    val start = lineStart(text, from) ?: continue
+                                    val vl = l.getLineForOffset(start.coerceAtMost(l.layoutInput.text.length))
+                                    val cy = padTop + (l.getLineTop(vl) + l.getLineBottom(vl)) / 2
+                                    drawPath(foldArrow(gutter / 2, cy, with(density) { 4.dp.toPx() }, from in folded), muted)
+                                }
+                            }
+                            // Taps in the gutter fold or unfold, before the text field sees them.
+                            .pointerInput(regions) {
+                                awaitEachGesture {
+                                    val down = awaitFirstDown(pass = PointerEventPass.Initial)
+                                    if (down.position.x > gutter) return@awaitEachGesture
+                                    down.consume()
+                                    val up = waitForUpOrCancellation(PointerEventPass.Initial) ?: return@awaitEachGesture
+                                    up.consume()
+                                    val l = layout ?: return@awaitEachGesture
+                                    val offset = l.getOffsetForPosition(Offset(gutter, up.position.y - padTop))
+                                    val line = value.text.substring(0, offset.coerceAtMost(value.text.length)).count { it == '\n' }
+                                    if (line in regions) {
+                                        tick()
+                                        folded = if (line in folded) folded - line else folded + line
+                                    }
+                                }
+                            }
+                            .padding(start = 22.dp, end = 18.dp, top = 8.dp, bottom = 8.dp)
                             .focusRequester(focus),
                         textStyle = TextStyle(color = text, fontSize = cfg.textSize.sp, lineHeight = 1.45.em, fontFamily = font),
                         cursorBrush = SolidColor(accent),
@@ -331,6 +387,27 @@ class EditorActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    /** Where line [line] of [text] starts, or null past the end. */
+    private fun lineStart(text: String, line: Int): Int? {
+        var offset = 0
+        repeat(line) {
+            val nl = text.indexOf('\n', offset)
+            if (nl < 0) return null
+            offset = nl + 1
+        }
+        return offset
+    }
+
+    /** Obsidian's fold arrow: pointing down when open, right when folded. */
+    private fun foldArrow(cx: Float, cy: Float, r: Float, isFolded: Boolean) = Path().apply {
+        if (isFolded) {
+            moveTo(cx - r * 0.6f, cy - r); lineTo(cx + r * 0.8f, cy); lineTo(cx - r * 0.6f, cy + r)
+        } else {
+            moveTo(cx - r, cy - r * 0.6f); lineTo(cx + r, cy - r * 0.6f); lineTo(cx, cy + r * 0.8f)
+        }
+        close()
     }
 
     /** A 34dp header button, the same size as the widget's. */

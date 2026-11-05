@@ -28,7 +28,11 @@ object NoteRows {
      * shifts as real rows arrive. [image] is the strip compressed (a few KB); [line] is the note
      * line it shows, and [task] whether that line is a task, for taps.
      */
-    class Row(val image: ByteArray, val line: Int, val task: Boolean, val text: CharSequence?)
+    class Row(
+        val image: ByteArray, val line: Int, val task: Boolean, val text: CharSequence?,
+        /** The foldable line whose arrow is in this strip, or -1; and whether it's folded. */
+        val fold: Int = -1, val folded: Boolean = false,
+    )
 
     /** One block laid out on the note's tall imaginary canvas, [top] to [top] + [height]. */
     private class Piece(
@@ -54,10 +58,12 @@ object NoteRows {
         val text = Vault.read(ctx, cfg.uri)
         // The list's width: the widget minus its side padding.
         val width = (TextBitmaps.widgetWidth(ctx, id) - dp(ctx, 14 + 6 + 8)).coerceAtLeast(1)
+        val regions = text?.let(Folds::regions).orEmpty()
+        val folded = text?.let { Folds.folded(ctx, id, it) }.orEmpty()
         fun rows(dark: Boolean): List<Row> {
-            val key = cacheKey(ctx, cfg, text, width, dark)
+            val key = cacheKey(ctx, cfg, text, width, dark) + "|" + folded.sorted()
             return cached(ctx, id, dark, key)
-                ?: render(ctx, cfg, cfg.palette(ctx, dark), text, width).also { save(ctx, id, dark, key, it) }
+                ?: render(ctx, cfg, cfg.palette(ctx, dark), text, width, regions, folded).also { save(ctx, id, dark, key, it) }
         }
         if (!dayAndNight(cfg)) return Built(rows(cfg.isDark(ctx)), null)
         val day = rows(false)
@@ -68,15 +74,21 @@ object NoteRows {
     /** For the debug render probe: [text] drawn as widget [id] would draw its note. */
     internal fun renderForProbe(ctx: Context, id: Int, text: String): List<Row> {
         val cfg = WidgetStore.load(ctx, id)!!
-        return render(ctx, cfg, cfg.palette(ctx), text, (TextBitmaps.widgetWidth(ctx, id) - dp(ctx, 14 + 6 + 8)).coerceAtLeast(1))
+        return render(ctx, cfg, cfg.palette(ctx), text, (TextBitmaps.widgetWidth(ctx, id) - dp(ctx, 14 + 6 + 8)).coerceAtLeast(1), emptyMap(), emptySet())
     }
 
-    private fun render(ctx: Context, cfg: WidgetConfig, p: Palette, text: String?, width: Int): List<Row> {
+    private fun render(
+        ctx: Context, cfg: WidgetConfig, p: Palette, text: String?, fullWidth: Int,
+        regions: Map<Int, Folds.Region>, folded: Set<Int>,
+    ): List<Row> {
+        // A gutter for fold arrows, as in Obsidian, only when the note has something to fold.
+        val gutter = if (regions.isEmpty()) 0 else dp(ctx, 18)
+        val width = fullWidth - gutter
         val indent = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, cfg.textSize * 1.2f, ctx.resources.displayMetrics).toInt()
         val blocks = if (text == null) {
             listOf(Block("Couldn't read ${cfg.notePath}. It may have been moved or renamed; tap the note's name to pick it again.", 0))
         } else {
-            Markdown.render(text, p, indent)
+            Markdown.render(text, p, indent, regions, folded)
         }
         val paint = TextBitmaps.paint(ctx, Fonts.typeface(cfg.fontFile), cfg.textSize, p.text)
         fun layout(t: CharSequence, w: Int) = StaticLayout.Builder.obtain(t, 0, t.length, paint, w.coerceAtLeast(1))
@@ -106,12 +118,13 @@ object NoteRows {
         val codeBg = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = p.codeBg }
         val headerBg = Paint().apply { color = p.backgroundAlt }
         val radius = dp(ctx, 6).toFloat()
+        val arrow = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = p.muted }
         val rows = (0 until count).map { i ->
             val top = i * strip
-            val bmp = Bitmap.createBitmap(width, strip, Bitmap.Config.ARGB_8888)
+            val bmp = Bitmap.createBitmap(fullWidth, strip, Bitmap.Config.ARGB_8888)
             bmp.density = ctx.resources.displayMetrics.densityDpi
             val canvas = Canvas(bmp)
-            canvas.translate(0f, -top.toFloat())
+            canvas.translate(gutter.toFloat(), -top.toFloat())
             for (piece in pieces) {
                 if (piece.top + piece.height <= top || piece.top >= top + strip) continue
                 canvas.save()
@@ -128,12 +141,42 @@ object NoteRows {
                 }
                 canvas.restore()
             }
+            // Fold arrows in the gutter, beside each foldable line's first line of text.
+            var fold: Piece? = null
+            for (piece in pieces) {
+                if (piece.block.fold == Block.NONE) continue
+                val y = arrowY(piece)
+                if (y < top || y >= top + strip) continue
+                drawArrow(canvas, -gutter / 2f, y.toFloat(), dp(ctx, 4).toFloat(), piece.block.fold == Block.FOLDED, arrow)
+                fold = piece
+            }
             // Taps go to the block under the strip's middle.
             val mid = top + strip / 2
             val under = pieces.firstOrNull { mid < it.top + it.height } ?: pieces.last()
-            Row(compress(bmp), under.block.line, under.block.task, spoken(pieces, top, top + strip))
+            Row(
+                compress(bmp), under.block.line, under.block.task, spoken(pieces, top, top + strip),
+                fold?.block?.line ?: -1, fold?.block?.fold == Block.FOLDED,
+            )
         }
         return rows
+    }
+
+    /** Where a foldable block's arrow goes: level with the middle of its first line. */
+    private fun arrowY(piece: Piece): Int {
+        val l = piece.layout ?: return piece.top + piece.height / 2
+        return piece.top + (l.getLineTop(0) + l.getLineBottom(0)) / 2
+    }
+
+    /** Obsidian's fold arrow: pointing down when open, right when folded. */
+    private fun drawArrow(canvas: Canvas, cx: Float, cy: Float, r: Float, folded: Boolean, paint: Paint) {
+        val path = android.graphics.Path()
+        if (folded) {
+            path.moveTo(cx - r * 0.6f, cy - r); path.lineTo(cx + r * 0.8f, cy); path.lineTo(cx - r * 0.6f, cy + r)
+        } else {
+            path.moveTo(cx - r, cy - r * 0.6f); path.lineTo(cx + r, cy - r * 0.6f); path.lineTo(cx, cy + r * 0.8f)
+        }
+        path.close()
+        canvas.drawPath(path, paint)
     }
 
     /**
@@ -243,7 +286,8 @@ object NoteRows {
                         val task = input.readBoolean()
                         val text = if (input.readBoolean()) input.readUTF() else null
                         val image = ByteArray(input.readInt()).also(input::readFully)
-                        Row(image, line, task, text)
+                        val fold = input.readInt()
+                        Row(image, line, task, text, fold, input.readBoolean())
                     }
                 }
             }.getOrNull()?.also { memory["$id/$dark"] = key to it }
@@ -265,6 +309,8 @@ object NoteRows {
                     r.text?.let { out.writeUTF(it.toString().take(8000)) }
                     out.writeInt(r.image.size)
                     out.write(r.image)
+                    out.writeInt(r.fold)
+                    out.writeBoolean(r.folded)
                 }
             }
             tmp.renameTo(file)
@@ -291,6 +337,14 @@ object NoteRows {
             R.id.item,
             Intent().putExtra(EditorActivity.EXTRA_LINE, row.line).putExtra(EditorActivity.EXTRA_TOGGLE, row.task),
         )
+        // The gutter over a fold arrow folds or unfolds, rather than opening the editor.
+        if (row.fold >= 0) {
+            setViewVisibility(R.id.fold_hit, android.view.View.VISIBLE)
+            setContentDescription(R.id.fold_hit, if (row.folded) "Unfold" else "Fold")
+            setOnClickFillInIntent(R.id.fold_hit, Intent().putExtra(TapActivity.EXTRA_FOLD, row.fold))
+        } else {
+            setViewVisibility(R.id.fold_hit, android.view.View.GONE)
+        }
     }
 
     /** Lossless WebP where available (about half the size of PNG for text). */

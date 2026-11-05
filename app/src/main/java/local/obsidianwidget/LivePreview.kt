@@ -3,6 +3,7 @@ package local.obsidianwidget
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.ParagraphStyle
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontFamily
@@ -29,6 +30,8 @@ class LivePreview(
     private val active: IntRange,
     /** Cursor offset; a list marker it sits in is shown as typed so it can be edited. */
     private val cursor: Int,
+    /** Lines inside folded regions, collapsed to nothing. */
+    private val collapsed: Set<Int> = emptySet(),
 ) : VisualTransformation {
 
     override fun filter(text: AnnotatedString): TransformedText =
@@ -67,9 +70,19 @@ class LivePreview(
             val styled = synchronized(cache) { cache[key] } ?: styleLine(line, ctx, on, cursorCol, nextIsRule).also {
                 synchronized(cache) { cache[key] = it }
             }
-            out.append(styled.text)
+            val start = out.length
+            if (i in collapsed) {
+                // Folded away: the line and its line break shrink to nothing.
+                out.append(line)
+            } else {
+                out.append(styled.text)
+            }
             if (raw.length > line.length) out.append("\r")
             if (i < lines.lastIndex) out.append('\n')
+            if (i in collapsed && out.length > start) {
+                out.addStyle(hidden, start, out.length)
+                out.addStyle(ParagraphStyle(lineHeight = 0.1.sp), start, out.length)
+            }
             ctx = styled.next.copy(first = false)
             offset += raw.length + 1
         }

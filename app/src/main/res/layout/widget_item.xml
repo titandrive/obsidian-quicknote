@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- One strip of the note, drawn as an image since widgets can't use a font file loaded at runtime. -->
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/item"
     android:layout_width="match_parent"
     android:layout_height="wrap_content">
@@ -11,4 +11,12 @@
         android:layout_height="wrap_content"
         android:adjustViewBounds="true"
         android:scaleType="fitStart" />
-</LinearLayout>
+
+    <!-- Over the gutter beside a fold arrow: tapping it folds or unfolds instead of editing. -->
+    <ImageView
+        android:id="@+id/fold_hit"
+        android:layout_width="24dp"
+        android:layout_height="match_parent"
+        android:layout_gravity="start"
+        android:visibility="gone" />
+</FrameLayout>

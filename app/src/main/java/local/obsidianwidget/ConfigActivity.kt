@@ -100,6 +100,8 @@ class ConfigActivity : ComponentActivity() {
     private suspend fun save(cfg: WidgetConfig) {
         val full = if (cfg.colors != null) cfg
         else cfg.copy(colors = withContext(Dispatchers.IO) { ObsidianTheme.load(this@ConfigActivity, cfg.vaultTree, cfg.theme) })
+        // Folds belong to the note; a different note starts unfolded.
+        if (WidgetStore.load(this, widgetId)?.noteUri != full.noteUri) Folds.forget(this, widgetId)
         WidgetStore.save(this, widgetId, full)
         ChangeCheck.schedule(this, widgetId)
         withContext(Dispatchers.IO) { NoteWidgetProvider.update(this@ConfigActivity, AppWidgetManager.getInstance(this@ConfigActivity), widgetId) }
