@@ -142,13 +142,16 @@ object NoteRows {
                 canvas.restore()
             }
             // Fold arrows in the gutter, beside each foldable line's first line of text.
+            // An arrow can straddle two strips (big headings put it on the border), so each strip it
+            // overlaps draws its part; taps go to the strip holding its middle.
             var fold: Piece? = null
+            val r = dp(ctx, 4)
             for (piece in pieces) {
                 if (piece.block.fold == Block.NONE) continue
                 val y = arrowY(piece)
-                if (y < top || y >= top + strip) continue
-                drawArrow(canvas, -gutter / 2f, y.toFloat(), dp(ctx, 4).toFloat(), piece.block.fold == Block.FOLDED, arrow)
-                fold = piece
+                if (y + r < top || y - r >= top + strip) continue
+                drawArrow(canvas, -gutter / 2f, y.toFloat(), r.toFloat(), piece.block.fold == Block.FOLDED, arrow)
+                if (y in top until top + strip) fold = piece
             }
             // Taps go to the block under the strip's middle.
             val mid = top + strip / 2
