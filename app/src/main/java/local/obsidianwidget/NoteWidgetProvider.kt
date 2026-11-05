@@ -223,6 +223,9 @@ class NoteWidgetProvider : AppWidgetProvider() {
                     Intent(Intent.ACTION_VIEW, Vault.openUri(cfg.vaultName, cfg.notePath)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
                 )),
             )
+            // Reading mode shows in the accent colour while it's on, like the editor's toolbar toggle.
+            color(views, R.id.btn_read, "setColorFilter", looks) { if (cfg.readOnly) it.accent else it.muted }
+            views.setOnClickPendingIntent(R.id.btn_read, activity(ctx, id, 7, tapIntent(ctx, id, "read").putExtra(TapActivity.EXTRA_READ, true)))
             views.setOnClickPendingIntent(R.id.btn_refresh, activity(ctx, id, 6, tapIntent(ctx, id, "refresh").putExtra(TapActivity.EXTRA_REFRESH, true)))
             mgr.updateAppWidget(id, views)
             if (!inline) mgr.notifyAppWidgetViewDataChanged(id, R.id.list)
@@ -234,8 +237,8 @@ class NoteWidgetProvider : AppWidgetProvider() {
         private fun title(ctx: Context, id: Int, cfg: WidgetConfig?, text: String, p: Palette): android.graphics.Bitmap {
             val bold = android.graphics.Typeface.create(Fonts.typeface(cfg?.fontFile), android.graphics.Typeface.BOLD)
             val d = ctx.resources.displayMetrics.density
-            // Room left beside the four 34dp buttons and the widget's side padding.
-            val max = TextBitmaps.widgetWidth(ctx, id) - ((14 + 6 + 4 * 34) * d).toInt()
+            // Room left beside the five 34dp buttons and the widget's side padding.
+            val max = TextBitmaps.widgetWidth(ctx, id) - ((14 + 6 + 5 * 34) * d).toInt()
             return TextBitmaps.line(ctx, text, max, TextBitmaps.paint(ctx, bold, 15f, p.title))
         }
 

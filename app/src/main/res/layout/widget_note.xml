@@ -61,6 +61,14 @@
                 android:textStyle="bold" />
 
             <ImageView
+                android:id="@+id/btn_read"
+                android:layout_width="34dp"
+                android:layout_height="34dp"
+                android:padding="8dp"
+                android:src="@drawable/ic_read"
+                android:contentDescription="@string/reading_mode" />
+
+            <ImageView
                 android:id="@+id/btn_refresh"
                 android:layout_width="34dp"
                 android:layout_height="34dp"

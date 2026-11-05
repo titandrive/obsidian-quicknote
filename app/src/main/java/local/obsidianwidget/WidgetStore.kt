@@ -23,6 +23,8 @@ data class WidgetConfig(
     val checkMinutes: Int = 30,
     /** Whether the editor shows its formatting toolbar for this widget's note. */
     val showToolbar: Boolean = true,
+    /** Reading mode: the note can be read and folded on the widget and in its popup, not edited. */
+    val readOnly: Boolean = false,
 ) {
     val vaultTree: Uri get() = Uri.parse(vault)
 
@@ -56,6 +58,7 @@ data class WidgetConfig(
         .put("noteUri", noteUri).put("notePath", notePath).put("theme", theme).put("mode", mode)
         .put("opacity", opacity).put("textSize", textSize.toDouble()).put("showHeader", showHeader)
         .put("vault", vault).put("vaultName", vaultName).put("checkMinutes", checkMinutes).put("showToolbar", showToolbar)
+        .put("readOnly", readOnly)
         .apply {
             colors?.let {
                 put("dark", it.dark.toJson()).put("light", it.light.toJson()).put("vaultMode", it.vaultMode).put("vaultFont", it.font)
@@ -72,7 +75,7 @@ data class WidgetConfig(
             ) else null,
             o.optBoolean("showHeader", true),
             o.optString("vault"), o.optString("vaultName"),
-            o.optInt("checkMinutes", 30), o.optBoolean("showToolbar", true),
+            o.optInt("checkMinutes", 30), o.optBoolean("showToolbar", true), o.optBoolean("readOnly", false),
         )
     }
 }

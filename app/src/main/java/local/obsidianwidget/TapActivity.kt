@@ -19,6 +19,8 @@ class TapActivity : Activity() {
         const val EXTRA_REFRESH = "refresh"
         /** The line of a fold arrow that was tapped. */
         const val EXTRA_FOLD = "fold"
+        /** Turns reading mode on or off. */
+        const val EXTRA_READ = "read"
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -38,15 +40,23 @@ class TapActivity : Activity() {
                     NoteWidgetProvider.update(app, android.appwidget.AppWidgetManager.getInstance(app), id)
                 }
             }
+            intent.getBooleanExtra(EXTRA_READ, false) -> {
+                val app = applicationContext
+                thread {
+                    val cfg = WidgetStore.load(app, id) ?: return@thread
+                    WidgetStore.save(app, id, cfg.copy(readOnly = !cfg.readOnly))
+                    NoteWidgetProvider.update(app, AppWidgetManager.getInstance(app), id)
+                }
+            }
             forward != null -> runCatching { startActivity(forward) }
             intent.getBooleanExtra(EXTRA_REFRESH, false) -> sendBroadcast(
                 Intent(this, NoteWidgetProvider::class.java).setAction(NoteWidgetProvider.ACTION_REFRESH)
                     .putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, id),
             )
             else -> {
-                // A line of the note: tick a task off, or edit there.
+                // A line of the note: tick a task off, or edit there; neither in reading mode.
                 val line = intent.getIntExtra(EditorActivity.EXTRA_LINE, -1)
-                val cfg = WidgetStore.load(this, id)
+                val cfg = WidgetStore.load(this, id)?.takeIf { !it.readOnly }
                 if (cfg != null && intent.getBooleanExtra(EditorActivity.EXTRA_TOGGLE, false)) {
                     val app = applicationContext
                     thread { EditorActivity.toggleTask(app, cfg, line) }

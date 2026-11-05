@@ -8,4 +8,5 @@
     <string name="open_in_obsidian">Open in Obsidian</string>
     <string name="widget_title_placeholder">Note</string>
     <string name="empty_note">Empty note. Tap to write.</string>
+    <string name="reading_mode">Reading mode</string>
 </resources>
