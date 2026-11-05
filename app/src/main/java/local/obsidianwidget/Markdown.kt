@@ -28,13 +28,24 @@ class Block(
     val table: Table? = null,
     /** [NONE], or a foldable line, [OPEN] or [FOLDED]. */
     val fold: Int = NONE,
+    /** A line of a callout, drawn in its box. */
+    val callout: CalloutLine? = null,
 ) {
+    fun copy(text: CharSequence = this.text, fold: Int = this.fold, callout: CalloutLine? = this.callout) =
+        Block(text, line, task, code, rule, table, fold, callout)
+
     companion object {
         const val NONE = 0
         const val OPEN = 1
         const val FOLDED = 2
     }
 }
+
+/**
+ * A line of a callout: its colour; [icon] on the title line; [last] on the callout's last line
+ * shown (the title, when it's folded or has nothing under it).
+ */
+class CalloutLine(val color: Int, val icon: String?, val last: Boolean = false)
 
 /** A markdown table: [rows] of cells (the first is the header), and each column's alignment. */
 class Table(val rows: List<List<CharSequence>>, val align: List<Layout.Alignment>)
@@ -161,19 +172,25 @@ object Markdown {
                         val inner = quote.groupValues[1]
                         val callout = CALLOUT.find(inner)
                         if (callout != null) {
+                            // A callout's title: its icon (drawn with the box), then the title in the
+                            // callout's colour, bold; with no title, the type's name.
                             val type = callout.groupValues[1].lowercase()
-                            val color = calloutColor(type, p)
+                            val color = p.calloutColor(type)
                             calloutColor = color
                             val title = callout.groupValues[2].ifEmpty { type.replaceFirstChar { it.uppercase() } }
                             val sb = inline(title, p)
-                            span(sb, 0, StyleSpan(Typeface.BOLD), ForegroundColorSpan(color), QuoteSpan(color))
-                            Block(sb, i)
+                            span(sb, 0, StyleSpan(Typeface.BOLD), ForegroundColorSpan(color))
+                            Block(sb, i, callout = CalloutLine(color, Callouts.kind(type).icon))
                         } else {
                             val sb = inline(inner, p)
                             if (sb.isEmpty()) sb.append(' ')
-                            span(sb, 0, QuoteSpan(calloutColor ?: p.quote))
-                            if (calloutColor == null) span(sb, 0, ForegroundColorSpan(p.muted))
-                            Block(sb, i)
+                            val color = calloutColor
+                            if (color != null) {
+                                Block(sb, i, callout = CalloutLine(color, null))
+                            } else {
+                                span(sb, 0, QuoteSpan(p.quote), ForegroundColorSpan(p.muted))
+                                Block(sb, i)
+                            }
                         }
                     }
                     RULE.matches(line) -> Block("", i, rule = true)
@@ -222,6 +239,12 @@ object Markdown {
         }
         // Drop trailing spacers so the note doesn't end in a gap.
         while (out.isNotEmpty() && out.last().text.isBlank() && !out.last().rule) out.removeAt(out.lastIndex)
+        // Each callout's last line shown closes its box.
+        for (k in out.indices) {
+            val c = out[k].callout ?: continue
+            val next = out.getOrNull(k + 1)?.callout
+            if (next == null || next.icon != null) out[k] = out[k].copy(callout = CalloutLine(c.color, c.icon, last = true))
+        }
         if (regions.isEmpty()) return out
         // Mark each foldable line's (first) block; a folded one ends in "…", as in Obsidian.
         val marked = HashSet<Int>()
@@ -233,7 +256,7 @@ object Markdown {
                 it.append("  …")
                 it.setSpan(ForegroundColorSpan(p.faint), start, it.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
             }
-            Block(text, b.line, b.task, b.code, b.rule, b.table, if (isFolded) Block.FOLDED else Block.OPEN)
+            b.copy(text = text, fold = if (isFolded) Block.FOLDED else Block.OPEN)
         }
     }
 
@@ -323,16 +346,7 @@ object Markdown {
 
     private fun withAlpha(c: Int, a: Int) = (c and 0x00FFFFFF) or (a shl 24)
 
-    // Colours of Obsidian's built-in callout types.
-    fun calloutColor(type: String, p: Palette): Int = when (type) {
-        "note" -> Color.rgb(68, 138, 255)
-        "abstract", "summary", "tldr", "info", "todo" -> Color.rgb(0, 176, 255)
-        "tip", "hint", "important" -> Color.rgb(0, 191, 165)
-        "success", "check", "done" -> Color.rgb(8, 185, 78)
-        "question", "help", "faq", "warning", "caution", "attention" -> Color.rgb(236, 117, 0)
-        "failure", "fail", "missing", "danger", "error", "bug" -> Color.rgb(233, 49, 71)
-        "example" -> Color.rgb(120, 82, 238)
-        "quote", "cite" -> Color.rgb(158, 158, 158)
-        else -> p.accent
-    }
+    /** The colour of a callout of [type], from the theme. */
+    fun calloutColor(type: String, p: Palette): Int = p.calloutColor(type)
+
 }

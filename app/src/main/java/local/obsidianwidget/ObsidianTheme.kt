@@ -33,7 +33,20 @@ data class Palette(
     val marker: Int = faint,
     /** Heading sizes relative to body text, h1 to h6. */
     val headingSizes: List<Float> = DEFAULT_HEADING_SIZES,
+    /** Callout colours by variable ("tip" for --callout-tip); empty for Obsidian's own. */
+    val callouts: Map<String, Int> = emptyMap(),
+    /** Callout corner radius and border width, in CSS pixels, and the border's opacity. */
+    val calloutRadius: Float = 4f,
+    val calloutBorder: Float = 0f,
+    val calloutBorderOpacity: Float = 0.25f,
 ) {
+    /** The colour of a callout of [type] ("note", "tip"...). */
+    fun calloutColor(type: String): Int {
+        val name = Callouts.kind(type).color
+        val dark = androidx.core.graphics.ColorUtils.calculateLuminance(background) < 0.5
+        return callouts[name] ?: callouts["default"] ?: (if (dark) DEFAULT_CALLOUTS_DARK else DEFAULT_CALLOUTS_LIGHT).getValue(name)
+    }
+
     fun toJson(): JSONObject = JSONObject()
         .put("background", background).put("backgroundAlt", backgroundAlt)
         .put("text", text).put("muted", muted).put("faint", faint)
@@ -43,9 +56,21 @@ data class Palette(
         .put("headings", JSONArray(headings))
         .put("title", title).put("marker", marker)
         .put("headingSizes", JSONArray(headingSizes.map { it.toDouble() }))
+        .put("callouts", JSONObject(callouts.mapValues { it.value }))
+        .put("calloutRadius", calloutRadius.toDouble()).put("calloutBorder", calloutBorder.toDouble())
+        .put("calloutBorderOpacity", calloutBorderOpacity.toDouble())
 
     companion object {
         val DEFAULT_HEADING_SIZES = listOf(1.802f, 1.602f, 1.424f, 1.266f, 1.125f, 1f)
+
+        // Obsidian's callout colours (app.css): its blue, cyan, green, orange, red and purple.
+        private fun callouts(blue: Int, cyan: Int, green: Int, orange: Int, red: Int, purple: Int) = mapOf(
+            "default" to blue, "summary" to cyan, "info" to blue, "todo" to blue, "important" to cyan, "tip" to cyan,
+            "success" to green, "question" to orange, "warning" to orange, "fail" to red, "error" to red, "bug" to red,
+            "example" to purple, "quote" to 0xFF9E9E9E.toInt(),
+        ).mapValues { it.value or 0xFF000000.toInt() }
+        val DEFAULT_CALLOUTS_DARK = callouts(0x027AFF, 0x53DFDD, 0x44CF6E, 0xE9973F, 0xFB464C, 0xA882FF)
+        val DEFAULT_CALLOUTS_LIGHT = callouts(0x086DDD, 0x00BFBC, 0x08B94E, 0xEC7500, 0xE93147, 0x7852EE)
 
         fun fromJson(o: JSONObject): Palette {
             val headings = o.getJSONArray("headings").let { a -> List(a.length()) { a.getInt(it) } }
@@ -59,6 +84,9 @@ data class Palette(
                 o.optInt("title", headings[0]),
                 o.optInt("marker", o.getInt("faint")),
                 o.optJSONArray("headingSizes")?.let { a -> List(a.length()) { a.getDouble(it).toFloat() } } ?: DEFAULT_HEADING_SIZES,
+                o.optJSONObject("callouts")?.let { c -> c.keys().asSequence().associateWith { c.getInt(it) } }.orEmpty(),
+                o.optDouble("calloutRadius", 4.0).toFloat(), o.optDouble("calloutBorder", 0.0).toFloat(),
+                o.optDouble("calloutBorderOpacity", 0.25).toFloat(),
             )
         }
 
@@ -229,6 +257,10 @@ object ObsidianTheme {
             title = c("@title-color", "--inline-title-color", "@h1-color", "--h1-color", fallback = text),
             marker = c("--list-marker-color", fallback = base.faint),
             headingSizes = (1..6).map { r.size("--h$it-size") ?: Palette.DEFAULT_HEADING_SIZES[it - 1] },
+            callouts = Callouts.COLORS.mapNotNull { name -> r.rgb("--callout-$name")?.let { name to it } }.toMap(),
+            calloutRadius = r.px("--callout-radius") ?: 4f,
+            calloutBorder = r.px("--callout-border-width") ?: 0f,
+            calloutBorderOpacity = r.size("--callout-border-opacity")?.let { if (it > 1) it / 100 else it } ?: 0.25f,
         )
     }
 
@@ -351,6 +383,19 @@ object ObsidianTheme {
         /** A size in em (or a bare number), e.g. "1.802em". */
         fun size(name: String): Float? = vars[name]?.let { evalCalc(subst(it, 0)).trim() }
             ?.let { Regex("^([0-9.]+)(em)?$").find(it)?.groupValues?.get(1)?.toFloatOrNull() }
+
+        /** A colour, or an "r, g, b" triplet as themes give callout colours. */
+        fun rgb(name: String): Int? {
+            val v = vars[name]?.let { evalCalc(subst(it, 0)) }?.trim() ?: return null
+            parseColor(v)?.let { return it }
+            val parts = v.split(',').map { it.trim().toFloatOrNull() ?: return null }
+            if (parts.size != 3) return null
+            return Color.rgb(clamp(parts[0]), clamp(parts[1]), clamp(parts[2]))
+        }
+
+        /** A length in px, e.g. "4px". */
+        fun px(name: String): Float? = vars[name]?.let { evalCalc(subst(it, 0)).trim() }
+            ?.let { Regex("^([0-9.]+)(px)?$").find(it)?.groupValues?.get(1)?.toFloatOrNull() }
 
         private fun subst(s: String, depth: Int): String {
             if (depth > 24) return ""
@@ -540,6 +585,17 @@ object ObsidianTheme {
         "--checkbox-color" to "var(--interactive-accent)",
         "--blockquote-border-color" to "var(--interactive-accent)",
         "--text-highlight-bg" to "rgba(255, 208, 0, 0.4)",
+        "--radius-s" to "4px",
+        "--callout-radius" to "var(--radius-s)",
+        "--callout-border-width" to "0px",
+        "--callout-border-opacity" to "0.25",
+        "--callout-default" to "var(--color-blue)", "--callout-summary" to "var(--color-cyan)",
+        "--callout-info" to "var(--color-blue)", "--callout-todo" to "var(--color-blue)",
+        "--callout-important" to "var(--color-cyan)", "--callout-tip" to "var(--color-cyan)",
+        "--callout-success" to "var(--color-green)", "--callout-question" to "var(--color-orange)",
+        "--callout-warning" to "var(--color-orange)", "--callout-fail" to "var(--color-red)",
+        "--callout-error" to "var(--color-red)", "--callout-bug" to "var(--color-red)",
+        "--callout-example" to "var(--color-purple)", "--callout-quote" to "#9e9e9e",
     ) + (1..6).associate { "--h$it-color" to "var(--text-normal)" }
 
     private val DARK = mapOf(
@@ -547,6 +603,8 @@ object ObsidianTheme {
         "--color-base-20" to "#262626", "--color-base-25" to "#2a2a2a", "--color-base-30" to "#363636",
         "--color-base-35" to "#3f3f3f", "--color-base-40" to "#555555", "--color-base-50" to "#666666",
         "--color-base-60" to "#999999", "--color-base-70" to "#bababa", "--color-base-100" to "#dadada",
+        "--color-red" to "#fb464c", "--color-orange" to "#e9973f", "--color-yellow" to "#e0de71", "--color-green" to "#44cf6e",
+        "--color-cyan" to "#53dfdd", "--color-blue" to "#027aff", "--color-purple" to "#a882ff", "--color-pink" to "#fa99cd",
     )
 
     private val LIGHT = mapOf(
@@ -554,5 +612,7 @@ object ObsidianTheme {
         "--color-base-20" to "#f6f6f6", "--color-base-25" to "#e3e3e3", "--color-base-30" to "#e0e0e0",
         "--color-base-35" to "#d4d4d4", "--color-base-40" to "#bdbdbd", "--color-base-50" to "#ababab",
         "--color-base-60" to "#707070", "--color-base-70" to "#5c5c5c", "--color-base-100" to "#222222",
+        "--color-red" to "#e93147", "--color-orange" to "#ec7500", "--color-yellow" to "#e0ac00", "--color-green" to "#08b94e",
+        "--color-cyan" to "#00bfbc", "--color-blue" to "#086ddd", "--color-purple" to "#7852ee", "--color-pink" to "#d53984",
     )
 }

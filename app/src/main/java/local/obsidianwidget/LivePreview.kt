@@ -13,7 +13,9 @@ import androidx.compose.ui.text.input.OffsetMapping
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.TransformedText
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextIndent
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 
@@ -167,10 +169,23 @@ class LivePreview(
                 val inner = line.substring(innerStart)
                 val c = Markdown.CALLOUT.find(inner)
                 if (c != null) callout = Color(Markdown.calloutColor(c.groupValues[1].lowercase(), p))
-                // ">" becomes a bar in the quote's (or callout's) colour.
-                if (!editing(gt, gt + 1)) {
+                if (callout != null) {
+                    // Inside a callout's box (drawn by the editor), padded as Obsidian pads it, with
+                    // room for the icon beside the title, and the box's top padding above the title.
+                    val left = CALLOUT_LEFT + if (c != null) CALLOUT_ICON + CALLOUT_GAP else 0f
+                    b.addStyle(
+                        ParagraphStyle(
+                            textIndent = TextIndent(left.em, left.em),
+                            lineHeight = if (c != null) (LINE_HEIGHT + CALLOUT_PAD).em else androidx.compose.ui.unit.TextUnit.Unspecified,
+                            lineHeightStyle = if (c != null) LineHeightStyle(LineHeightStyle.Alignment.Bottom, LineHeightStyle.Trim.None) else null,
+                        ),
+                        0, line.length,
+                    )
+                    if (editing(gt, gt + 1)) markup(0, innerStart) else style(hidden, 0, innerStart)
+                } else if (!editing(gt, gt + 1)) {
+                    // ">" becomes a bar in the quote's colour.
                     shown[gt] = '▎'
-                    style(SpanStyle(color = callout ?: Color(p.quote), fontWeight = FontWeight.Bold), gt, gt + 1)
+                    style(SpanStyle(color = Color(p.quote), fontWeight = FontWeight.Bold), gt, gt + 1)
                 } else {
                     markup(0, innerStart)
                 }
@@ -303,6 +318,45 @@ class LivePreview(
     }
 
     companion object {
+        /** The editor's line height, in ems. */
+        const val LINE_HEIGHT = 1.45f
+        /** A callout's padding (top, and left of its text), its icon and the gap after it, in ems: Obsidian's CSS pixels for 16px text. */
+        const val CALLOUT_PAD = 0.75f
+        const val CALLOUT_LEFT = 1.5f
+        const val CALLOUT_ICON = 1.125f
+        const val CALLOUT_GAP = 0.25f
+
+        /** A callout in the text: its title line, its last line shown, colour and icon. */
+        class CalloutBox(val from: Int, val to: Int, val color: Int, val icon: String)
+
+        /** The callouts in [text], for the editor to draw their boxes; lines in [collapsed] don't count. */
+        fun calloutBoxes(text: String, p: Palette, collapsed: Set<Int>): List<CalloutBox> {
+            val lines = text.split('\n')
+            val out = ArrayList<CalloutBox>()
+            var i = 0
+            var fence = false
+            while (i < lines.size) {
+                if (Markdown.FENCE.containsMatchIn(lines[i])) fence = !fence
+                val title = if (fence) null else Markdown.QUOTE.find(lines[i])?.let { Markdown.CALLOUT.find(it.groupValues[1]) }
+                if (title == null) {
+                    i++
+                    continue
+                }
+                val type = title.groupValues[1]
+                var to = i
+                var j = i + 1
+                while (j < lines.size) {
+                    val q = Markdown.QUOTE.find(lines[j]) ?: break
+                    if (Markdown.CALLOUT.containsMatchIn(q.groupValues[1])) break
+                    if (j !in collapsed) to = j
+                    j++
+                }
+                out.add(CalloutBox(i, to, p.calloutColor(type), Callouts.kind(type).icon))
+                i = j
+            }
+            return out
+        }
+
         /** Styled lines kept for reuse; old ones drop off once there are this many. */
         private val cache = object : LinkedHashMap<Key, Styled>(1024, 0.75f, true) {
             override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Key, Styled>?) = size > 5000

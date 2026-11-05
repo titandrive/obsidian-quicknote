@@ -38,6 +38,8 @@ object NoteRows {
     private class Piece(
         val block: Block, val layout: StaticLayout?, val top: Int, val height: Int, val pad: Int,
         val table: TableLayout? = null,
+        /** Where the text is drawn within the piece (callouts are padded). */
+        val textX: Int = 0, val textTop: Int = 0,
     )
 
     /** A table laid out: column lefts and widths, row tops and heights, and each cell's text. */
@@ -114,11 +116,26 @@ object NoteRows {
         fun layout(t: CharSequence, w: Int) = StaticLayout.Builder.obtain(t, 0, t.length, paint, w.coerceAtLeast(1))
             .setAlignment(Layout.Alignment.ALIGN_NORMAL).setLineSpacing(0f, 1.15f).setIncludePad(true).build()
 
+        // Callouts are boxes padded as Obsidian pads them (12px around, 24px at the left, in CSS
+        // pixels for 16px text), scaled to the widget's text size.
+        val css = paint.textSize / 16f
+        val boxPad = (12 * css).toInt()
+        val boxLeft = (24 * css).toInt()
+        val iconSize = (18 * css).toInt()
+        val iconGap = (4 * css).toInt()
+
         // Stack the blocks: code blocks get padding and a background, rules are a thin line.
         val pieces = ArrayList<Piece>()
         var y = 0
         for (b in blocks) {
+            val callout = b.callout
             val piece = when {
+                callout != null -> {
+                    val x = boxLeft + if (callout.icon != null) iconSize + iconGap else 0
+                    val l = layout(b.text, width - x - boxPad)
+                    val above = if (callout.icon != null) boxPad else 0
+                    Piece(b, l, y, above + l.height + if (callout.last) boxPad else 0, 0, textX = x, textTop = above)
+                }
                 b.table != null -> layoutTable(ctx, b.table, paint, width).let { Piece(b, null, y, it.ys.last() + it.heights.last() + 1, 0, it) }
                 b.rule -> Piece(b, null, y, dp(ctx, 17), 0)
                 b.code -> {
@@ -139,12 +156,46 @@ object NoteRows {
         val headerBg = Paint().apply { color = p.backgroundAlt }
         val radius = dp(ctx, 6).toFloat()
         val arrow = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = p.muted }
+        // Each callout's box: from its title's top to its last line's bottom.
+        class Box(val top: Int, val bottom: Int, val color: Int)
+        val boxes = ArrayList<Box>()
+        var boxTop = -1
+        for (piece in pieces) {
+            val c = piece.block.callout ?: continue
+            if (c.icon != null || boxTop < 0) boxTop = piece.top
+            if (c.last) {
+                boxes.add(Box(boxTop, piece.top + piece.height, c.color))
+                boxTop = -1
+            }
+        }
+        val boxFill = Paint(Paint.ANTI_ALIAS_FLAG)
+        val boxBorder = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            strokeWidth = maxOf(1f, p.calloutBorder * css)
+        }
+        val boxRadius = p.calloutRadius * css
+        val iconPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            strokeCap = Paint.Cap.ROUND
+            strokeJoin = Paint.Join.ROUND
+        }
         val rows = (0 until count).map { i ->
             val top = i * strip
             val bmp = Bitmap.createBitmap(fullWidth, strip, Bitmap.Config.ARGB_8888)
             bmp.density = ctx.resources.displayMetrics.densityDpi
             val canvas = Canvas(bmp)
             canvas.translate(gutter.toFloat(), -top.toFloat())
+            // Callout boxes go under their text: the callout's colour at 10%, as in Obsidian.
+            for (box in boxes) {
+                if (box.bottom <= top || box.top >= top + strip) continue
+                boxFill.color = (box.color and 0xFFFFFF) or (0x1A shl 24)
+                canvas.drawRoundRect(0f, box.top.toFloat(), width.toFloat(), box.bottom.toFloat(), boxRadius, boxRadius, boxFill)
+                if (p.calloutBorder > 0f) {
+                    boxBorder.color = (box.color and 0xFFFFFF) or ((p.calloutBorderOpacity * 255).toInt().coerceIn(0, 255) shl 24)
+                    val inset = boxBorder.strokeWidth / 2
+                    canvas.drawRoundRect(inset, box.top + inset, width - inset, box.bottom - inset, boxRadius, boxRadius, boxBorder)
+                }
+            }
             for (piece in pieces) {
                 if (piece.top + piece.height <= top || piece.top >= top + strip) continue
                 canvas.save()
@@ -157,7 +208,24 @@ object NoteRows {
                         canvas.translate(piece.pad.toFloat(), dp(ctx, 6).toFloat())
                         piece.layout!!.draw(canvas)
                     }
-                    else -> piece.layout!!.draw(canvas)
+                    else -> {
+                        val c = piece.block.callout
+                        val icon = c?.icon
+                        if (icon != null) {
+                            // The type's icon, level with the title's first line.
+                            val l = piece.layout!!
+                            val mid = piece.textTop + (l.getLineTop(0) + l.getLineBottom(0)) / 2f
+                            canvas.save()
+                            canvas.translate(boxLeft.toFloat(), mid - iconSize / 2f)
+                            canvas.scale(iconSize / 24f, iconSize / 24f)
+                            iconPaint.color = c.color
+                            iconPaint.strokeWidth = 2f
+                            canvas.drawPath(Callouts.icon(icon), iconPaint)
+                            canvas.restore()
+                        }
+                        canvas.translate(piece.textX.toFloat(), piece.textTop.toFloat())
+                        piece.layout!!.draw(canvas)
+                    }
                 }
                 canvas.restore()
             }
@@ -197,13 +265,13 @@ object NoteRows {
     /** The top and bottom of a block's first row of text on the note's canvas. */
     private fun firstRow(piece: Piece): Pair<Int, Int> {
         val l = piece.layout ?: return piece.top to piece.top + piece.height
-        return piece.top + l.getLineTop(0) to piece.top + l.getLineBottom(0)
+        return piece.top + piece.textTop + l.getLineTop(0) to piece.top + piece.textTop + l.getLineBottom(0)
     }
 
     /** Where a foldable block's arrow goes: level with the middle of its first line. */
     private fun arrowY(piece: Piece): Int {
         val l = piece.layout ?: return piece.top + piece.height / 2
-        return piece.top + (l.getLineTop(0) + l.getLineBottom(0)) / 2
+        return piece.top + piece.textTop + (l.getLineTop(0) + l.getLineBottom(0)) / 2
     }
 
     /** Obsidian's fold arrow: pointing down when open, right when folded. */
@@ -234,7 +302,7 @@ object NoteRows {
                     if (mid in top until bottom) parts.add(table.cells[r].joinToString(", ") { it.text.toString().trim() })
                 }
             } else if (layout != null) {
-                val offset = piece.top + if (piece.block.code) piece.pad else 0
+                val offset = piece.top + piece.textTop + if (piece.block.code) piece.pad else 0
                 for (l in 0 until layout.lineCount) {
                     val mid = offset + (layout.getLineTop(l) + layout.getLineBottom(l)) / 2
                     if (mid in top until bottom) parts.add(layout.text.subSequence(layout.getLineStart(l), layout.getLineEnd(l)).toString().trim())

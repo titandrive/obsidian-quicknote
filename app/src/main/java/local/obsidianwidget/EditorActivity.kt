@@ -62,6 +62,8 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.asComposePath
+import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
@@ -247,6 +249,7 @@ class EditorActivity : ComponentActivity() {
         val regions = remember(value.text) { Folds.regions(value.text) }
         val collapsed = remember(value.text, folded) { Folds.hiddenLines(value.text, folded, regions) }
         val preview = remember(active, cursor, collapsed) { LivePreview(p, cfg.textSize, active, cursor, collapsed) }
+        val callouts = remember(value.text, collapsed) { LivePreview.calloutBoxes(value.text, p, collapsed) }
         val density = LocalDensity.current
         val gutter = with(density) { 22.dp.toPx() }
         val tick = rememberHaptic()
@@ -339,6 +342,7 @@ class EditorActivity : ComponentActivity() {
                             .drawBehind {
                                 val l = layout ?: return@drawBehind
                                 val text = value.text
+                                drawCallouts(l, text, callouts, padTop, with(density) { 22.dp.toPx() }, size.width - with(density) { 18.dp.toPx() }, with(density) { cfg.textSize.sp.toPx() }, p)
                                 for ((from, _) in regions) {
                                     if (from in collapsed) continue
                                     val start = lineStart(text, from) ?: continue
@@ -438,6 +442,47 @@ class EditorActivity : ComponentActivity() {
     }
 
     /** Obsidian's fold arrow: pointing down when open, right when folded. */
+    /**
+     * Callout boxes behind their text, as Obsidian draws them: the callout's colour at 10%, rounded,
+     * with the theme's border, and the type's icon beside the title.
+     */
+    private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawCallouts(
+        l: TextLayoutResult, text: String, boxes: List<LivePreview.Companion.CalloutBox>,
+        top: Float, left: Float, right: Float, em: Float, p: Palette,
+    ) {
+        val length = l.layoutInput.text.length
+        val radius = p.calloutRadius * em / 16
+        for (box in boxes) {
+            val from = lineStart(text, box.from)?.coerceAtMost(length) ?: continue
+            val toStart = lineStart(text, box.to)?.coerceAtMost(length) ?: continue
+            val toEnd = text.indexOf('\n', toStart).let { if (it < 0) text.length else it }.coerceAtMost(length)
+            val titleLine = l.getLineForOffset(from)
+            val y0 = top + l.getLineTop(titleLine)
+            // The text has no room for padding below the last line, so the box takes some of the gap after it.
+            val y1 = top + l.getLineBottom(l.getLineForOffset(toEnd)) + em * 0.4f
+            val color = Color(box.color)
+            drawRoundRect(color.copy(alpha = 0.1f), Offset(left, y0), androidx.compose.ui.geometry.Size(right - left, y1 - y0), androidx.compose.ui.geometry.CornerRadius(radius))
+            if (p.calloutBorder > 0f) {
+                val w = maxOf(1f, p.calloutBorder * em / 16)
+                drawRoundRect(
+                    color.copy(alpha = p.calloutBorderOpacity), Offset(left + w / 2, y0 + w / 2),
+                    androidx.compose.ui.geometry.Size(right - left - w, y1 - y0 - w), androidx.compose.ui.geometry.CornerRadius(radius),
+                    style = androidx.compose.ui.graphics.drawscope.Stroke(w),
+                )
+            }
+            // The icon, level with the title's text, which sits at the bottom of its padded line.
+            val icon = em * LivePreview.CALLOUT_ICON
+            val mid = top + l.getLineBottom(titleLine) - em * LivePreview.LINE_HEIGHT / 2
+            val path = Callouts.icon(box.icon)
+            withTransform({
+                translate(left + em * LivePreview.CALLOUT_LEFT, mid - icon / 2)
+                scale(icon / 24f, icon / 24f, Offset.Zero)
+            }) {
+                drawPath(path.asComposePath(), color, style = androidx.compose.ui.graphics.drawscope.Stroke(2f, cap = androidx.compose.ui.graphics.StrokeCap.Round, join = androidx.compose.ui.graphics.StrokeJoin.Round))
+            }
+        }
+    }
+
     private fun foldArrow(cx: Float, cy: Float, r: Float, isFolded: Boolean) = Path().apply {
         if (isFolded) {
             moveTo(cx - r * 0.6f, cy - r); lineTo(cx + r * 0.8f, cy); lineTo(cx - r * 0.6f, cy + r)
