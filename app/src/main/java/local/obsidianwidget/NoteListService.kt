@@ -297,9 +297,12 @@ object NoteRows {
      * Rendered rows are kept, in memory and in the cache folder, keyed by everything that goes
      * into them. The launcher asks for a widget's rows again whenever it redraws it (after an
      * unlock, or coming back from an app), often after the app was frozen or closed; rendering
-     * them again left the widget blank for a moment.
+     * them again left the widget blank for a moment. Memory holds a few versions per widget,
+     * so folding something and unfolding it again is instant.
      */
-    private val memory = HashMap<String, Pair<String, List<Row>>>()
+    private val memory = object : LinkedHashMap<String, List<Row>>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, List<Row>>?) = size > 8
+    }
 
     private fun cacheKey(ctx: Context, cfg: WidgetConfig, text: String?, width: Int, dark: Boolean): String {
         val res = ctx.resources
@@ -316,7 +319,7 @@ object NoteRows {
     private fun cacheFile(ctx: Context, id: Int, dark: Boolean) = File(ctx.cacheDir, "rows-$id-${if (dark) "dark" else "light"}.bin")
 
     private fun cached(ctx: Context, id: Int, dark: Boolean, key: String): List<Row>? = synchronized(memory) {
-        memory["$id/$dark"]?.takeIf { it.first == key }?.second
+        memory["$id/$dark/$key"]
             ?: runCatching {
                 DataInputStream(cacheFile(ctx, id, dark).inputStream().buffered()).use { input ->
                     if (input.readUTF() != key) return@use null
@@ -329,11 +332,11 @@ object NoteRows {
                         Row(image, line, task, text, fold, input.readBoolean())
                     }
                 }
-            }.getOrNull()?.also { memory["$id/$dark"] = key to it }
+            }.getOrNull()?.also { memory["$id/$dark/$key"] = it }
     }
 
     private fun save(ctx: Context, id: Int, dark: Boolean, key: String, rows: List<Row>) = synchronized(memory) {
-        memory["$id/$dark"] = key to rows
+        memory["$id/$dark/$key"] = rows
         runCatching {
             val file = cacheFile(ctx, id, dark)
             val tmp = File(file.path + ".tmp")
@@ -358,7 +361,7 @@ object NoteRows {
 
     fun forget(ctx: Context, id: Int) = synchronized(memory) {
         for (dark in listOf(false, true)) {
-            memory.remove("$id/$dark")
+            memory.keys.removeAll { it.startsWith("$id/$dark/") }
             cacheFile(ctx, id, dark).delete()
         }
     }
@@ -422,11 +425,26 @@ object NoteRows {
     }
 
     /** Lossless WebP where available (about half the size of PNG for text). */
-    private fun compress(bmp: Bitmap): ByteArray = ByteArrayOutputStream().use { out ->
-        val format = if (android.os.Build.VERSION.SDK_INT >= 30) Bitmap.CompressFormat.WEBP_LOSSLESS else Bitmap.CompressFormat.PNG
-        bmp.compress(format, 75, out)
+    private fun compress(bmp: Bitmap): ByteArray {
+        // A fold redraws the whole note, but most strips come out the same as before (everything
+        // above it, and below it when whole lines were hidden); those reuse their bytes.
+        val pixels = java.nio.ByteBuffer.allocate(bmp.byteCount).also { bmp.copyPixelsToBuffer(it) }.array()
+        val crc = java.util.zip.CRC32().apply { update(pixels) }.value
+        val hash = (crc shl 32) xor (pixels.contentHashCode().toLong() and 0xffffffffL) xor (bmp.width.toLong() * 31 + bmp.height)
+        synchronized(strips) { strips[hash] }?.let { bmp.recycle(); return it }
+        val bytes = ByteArrayOutputStream().use { out ->
+            val format = if (android.os.Build.VERSION.SDK_INT >= 30) Bitmap.CompressFormat.WEBP_LOSSLESS else Bitmap.CompressFormat.PNG
+            bmp.compress(format, 75, out)
+            out.toByteArray()
+        }
         bmp.recycle()
-        out.toByteArray()
+        synchronized(strips) { strips[hash] = bytes }
+        return bytes
+    }
+
+    /** Compressed strips by their pixels, for [compress]. */
+    private val strips = object : LinkedHashMap<Long, ByteArray>(256, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Long, ByteArray>?) = size > 1500
     }
 
     private fun dp(ctx: Context, v: Int) = (v * ctx.resources.displayMetrics.density).toInt()

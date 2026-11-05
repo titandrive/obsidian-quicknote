@@ -117,10 +117,13 @@ object ChangeCheck {
      * and light or dark unless the launcher switches that by itself.
      */
     private fun stamp(ctx: Context, cfg: WidgetConfig): String {
-        val file = runCatching {
+        val note = runCatching {
             ctx.contentResolver.query(cfg.uri, arrayOf(Document.COLUMN_LAST_MODIFIED, Document.COLUMN_SIZE), null, null, null)
                 ?.use { if (it.moveToFirst()) "${it.getLong(0)}:${it.getLong(1)}" else null }
         }.getOrNull() ?: "missing"
+        // Folds changed in Obsidian, when a plugin shares them.
+        val folds = runCatching { Folds.Shared.watched(ctx, cfg.vaultTree)?.let { ":" + Vault.stamp(ctx, cfg.vaultTree, listOf(it)) } }.getOrNull().orEmpty()
+        val file = note + folds
         return if (NoteRows.dayAndNight(cfg)) file else "$file:${cfg.isDark(ctx)}"
     }
 

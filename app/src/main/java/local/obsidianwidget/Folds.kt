@@ -1,11 +1,19 @@
 package local.obsidianwidget
 
 import android.content.Context
+import android.net.Uri
+import org.json.JSONArray
+import org.json.JSONObject
 
 /**
  * Folding, as in Obsidian: headings (down to the next heading of the same or a higher level),
  * list items with nested items, and callouts written foldable ("[!note]-" starts folded,
  * "[!note]+" open). Each widget keeps its own folds, by the line each folded region starts on.
+ *
+ * With a fold-syncing plugin on in the vault (Live Fold Sync, or Sync Folds), heading and list
+ * folds are Obsidian's instead: read from and written to the plugin's data.json, so they're the
+ * same in Obsidian, the widget and its editor. Callouts fold by their marker, which Obsidian
+ * doesn't keep, so those stay the widget's.
  */
 object Folds {
     enum class Kind { HEADING, LIST, CALLOUT }
@@ -66,6 +74,7 @@ object Folds {
     fun folded(ctx: Context, id: Int, text: String): Set<Int> {
         val regions = regions(text)
         val taps = load(ctx, id)
+        val shared = Shared.of(ctx, id)?.read(ctx, text)
         val lines = text.split('\n')
         return regions.values.filter { r ->
             when (r.kind) {
@@ -73,14 +82,21 @@ object Folds {
                     val startsFolded = CALLOUT.find(lines[r.from])!!.groupValues[1] == "-"
                     if (r.from in taps) !startsFolded else startsFolded
                 }
-                else -> r.from in taps
+                else -> if (shared != null) r.from in shared else r.from in taps
             }
         }.map { it.from }.toSet()
     }
 
     /** Folds or unfolds the region starting on [line] of [text], on widget [id]. */
     fun toggle(ctx: Context, id: Int, text: String, line: Int) {
-        if (line !in regions(text)) return
+        val regions = regions(text)
+        val region = regions[line] ?: return
+        if (region.kind != Kind.CALLOUT && Shared.of(ctx, id) != null) {
+            // Flipped from what's showing, which is Obsidian's folds when it has them for this text.
+            val now = folded(ctx, id, text)
+            set(ctx, id, text, if (line in now) now - line else now + line)
+            return
+        }
         val taps = load(ctx, id).toMutableSet()
         if (!taps.add(line)) taps.remove(line)
         save(ctx, id, taps)
@@ -118,6 +134,87 @@ object Folds {
             val isFolded = r.from in folded
             if (r.kind == Kind.CALLOUT) isFolded != (CALLOUT.find(lines[r.from])!!.groupValues[1] == "-") else isFolded
         }.map { it.from }.toSet())
+        Shared.of(ctx, id)?.write(ctx, text, regions.values.filter { it.kind != Kind.CALLOUT && it.from in folded })
+    }
+
+    /**
+     * A fold-syncing plugin's folds for one note: its data.json holds
+     * `{"folds": "<JSON of {path: {folds: [{from, to}], lines}}>"}`, lines counted from 0, as
+     * Obsidian keeps them.
+     */
+    class Shared(private val data: Uri, private val path: String) {
+        /** The folded lines, or null if they were saved for another version of the note. */
+        fun read(ctx: Context, text: String): Set<Int>? {
+            val info = all(ctx)?.optJSONObject(path) ?: return emptySet()
+            if (info.optInt("lines", -1) != text.split('\n').size) return null
+            val folds = info.optJSONArray("folds") ?: return emptySet()
+            return (0 until folds.length()).mapNotNull { folds.optJSONObject(it)?.optInt("from", -1)?.takeIf { f -> f >= 0 } }.toSet()
+        }
+
+        fun write(ctx: Context, text: String, folded: List<Region>) {
+            synchronized(Shared) {
+                val raw = Vault.read(ctx, data) ?: return
+                val root = runCatching { JSONObject(raw) }.getOrNull() ?: return
+                val all = runCatching { JSONObject(root.optString("folds", "{}")) }.getOrNull() ?: return
+                val lines = text.split('\n')
+                val old = all.optJSONObject(path)
+                // The same folds as Obsidian last saved needn't be written (that would only wake it).
+                if (old != null && old.optInt("lines") == lines.size) {
+                    val was = old.optJSONArray("folds")?.let { a -> (0 until a.length()).map { a.getJSONObject(it).optInt("from") }.toSet() }
+                    if (was == folded.map { it.from }.toSet()) return
+                } else if (old == null && folded.isEmpty()) return
+                if (folded.isEmpty()) all.remove(path)
+                else all.put(path, JSONObject().put("lines", lines.size).put("folds", JSONArray().apply {
+                    for (r in folded.sortedBy { it.from }) put(JSONObject().put("from", r.from).put("to", end(lines, r)))
+                }))
+                root.put("folds", all.toString())
+                runCatching { Vault.write(ctx, data, root.toString(2)) }
+            }
+        }
+
+        private fun all(ctx: Context): JSONObject? = Vault.read(ctx, data)
+            ?.let { runCatching { JSONObject(JSONObject(it).optString("folds", "{}")) }.getOrNull() }
+
+        /** Where Obsidian ends a fold: a heading's takes the blank lines before the next heading. */
+        private fun end(lines: List<String>, r: Region): Int {
+            if (r.kind != Kind.HEADING) return r.to
+            var to = r.to
+            while (to + 1 < lines.size && lines[to + 1].isBlank()) to++
+            return to
+        }
+
+        companion object {
+            private val PLUGINS = listOf("live-fold-sync", "sync-folds")
+
+            // Where each vault's plugin data is, so a fold doesn't walk the vault's folders again.
+            private val found = HashMap<String, Pair<Long, Uri?>>()
+
+            /** Widget [id]'s note's shared folds, or null when no fold-syncing plugin is on. */
+            fun of(ctx: Context, id: Int): Shared? {
+                val cfg = WidgetStore.load(ctx, id) ?: return null
+                val tree = cfg.vaultTree
+                val now = android.os.SystemClock.uptimeMillis()
+                val data = synchronized(found) {
+                    found[tree.toString()]?.takeIf { now - it.first < 60_000 }?.second
+                        ?: locate(ctx, tree).also { found[tree.toString()] = now to it }
+                } ?: return null
+                return Shared(data, cfg.notePath)
+            }
+
+            private fun locate(ctx: Context, tree: Uri): Uri? {
+                val enabled = Vault.readPath(ctx, tree, ".obsidian/community-plugins.json")
+                    ?.let { runCatching { JSONArray(it) }.getOrNull() }
+                    ?.let { a -> List(a.length()) { a.optString(it) } }.orEmpty()
+                val plugin = PLUGINS.firstOrNull { it in enabled } ?: return null
+                return Vault.find(ctx, tree, ".obsidian/plugins/$plugin/data.json")
+            }
+
+            /** The data file to watch for folds changed in Obsidian, from the vault root. */
+            fun watched(ctx: Context, tree: Uri): String? {
+                val enabled = Vault.readPath(ctx, tree, ".obsidian/community-plugins.json") ?: return null
+                return PLUGINS.firstOrNull { enabled.contains("\"$it\"") }?.let { ".obsidian/plugins/$it/data.json" }
+            }
+        }
     }
 
     /** The lines of [text] hidden inside the [folded] regions. */
