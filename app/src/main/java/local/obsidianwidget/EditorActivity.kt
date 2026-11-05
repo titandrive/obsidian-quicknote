@@ -112,6 +112,8 @@ class EditorActivity : ComponentActivity() {
     private var widgetId = AppWidgetManager.INVALID_APPWIDGET_ID
     /** Folded regions, by start line of the text being edited; saved with the note. */
     private var folded by mutableStateOf<Set<Int>>(emptySet())
+    /** The folds as last saved, to tell whether folding changed with no edit to save. */
+    private var savedFolds: Set<Int> = emptySet()
     /** Whether the formatting toolbar shows; remembered per widget. */
     private var showToolbar by mutableStateOf(true)
     /** The vault's mobile toolbar buttons, once read. */
@@ -130,7 +132,8 @@ class EditorActivity : ComponentActivity() {
         lifecycleScope.launch {
             val text = withContext(Dispatchers.IO) { Vault.read(this@EditorActivity, cfg.uri) }.orEmpty()
             original = text
-            folded = withContext(Dispatchers.IO) { Folds.folded(this@EditorActivity, widgetId, text) }
+            savedFolds = withContext(Dispatchers.IO) { Folds.folded(this@EditorActivity, widgetId, text) }
+            folded = savedFolds
                 // A tapped line inside a fold opens it, as in Obsidian.
                 .let { f -> if (line >= 0) f.filterNot { from -> Folds.regions(text)[from]?.let { line in it.from + 1..it.to } == true }.toSet() else f }
             value = TextFieldValue(text, TextRange(cursorFor(text, line)))
@@ -162,12 +165,29 @@ class EditorActivity : ComponentActivity() {
 
     override fun onPause() {
         super.onPause()
-        // Leaving by home or recents still keeps the edit.
-        if (loaded && !isFinishing && value.text != original) save(force = true)
+        // Leaving by home or recents still keeps the edit, and any folding.
+        if (loaded && !isFinishing) {
+            if (value.text != original) save(force = true)
+            saveFolds()
+        }
     }
 
     private fun done() {
-        if (!loaded || value.text == original || save(force = false)) finish()
+        if (!loaded || value.text == original || save(force = false)) {
+            saveFolds()
+            finish()
+        }
+    }
+
+    /**
+     * Saves folding done without editing (an edit saves its folds along with the text), so the
+     * widget shows the same folds; folds are the widget's, shared between it and the editor.
+     */
+    private fun saveFolds() {
+        if (!loaded || folded == savedFolds || value.text != original) return
+        Folds.set(this, widgetId, value.text, folded)
+        savedFolds = folded
+        NoteWidgetProvider.refreshNote(this, cfg.noteUri)
     }
 
     /** Writes the note; without [force], refuses if it was changed elsewhere since it was opened. */
@@ -181,6 +201,7 @@ class EditorActivity : ComponentActivity() {
         runCatching { Vault.write(this, cfg.uri, text) }.onSuccess {
             // The folds as they are in the text just saved.
             Folds.set(this, widgetId, text, folded)
+            savedFolds = folded
         }.onFailure {
             android.widget.Toast.makeText(this, "Couldn't save: ${it.message}", android.widget.Toast.LENGTH_LONG).show()
             return false
@@ -425,6 +446,7 @@ class EditorActivity : ComponentActivity() {
     /** Saves (asking first if the note changed elsewhere), then goes to [intent] and closes. */
     private fun leaveFor(intent: Intent) {
         if (value.text == original || save(force = false)) {
+            saveFolds()
             startActivity(intent)
             finish()
         }
