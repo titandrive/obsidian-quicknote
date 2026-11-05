@@ -344,11 +344,11 @@ class EditorActivity : ComponentActivity() {
                             .drawBehind {
                                 val l = layout ?: return@drawBehind
                                 val text = value.text
-                                drawCallouts(l, text, callouts, padTop, with(density) { 22.dp.toPx() }, size.width - with(density) { 18.dp.toPx() }, with(density) { cfg.textSize.sp.toPx() }, p)
+                                drawCallouts(l, text, preview, callouts, padTop, with(density) { 22.dp.toPx() }, size.width - with(density) { 18.dp.toPx() }, with(density) { cfg.textSize.sp.toPx() }, p)
                                 for ((from, _) in regions) {
                                     if (from in collapsed) continue
                                     val start = lineStart(text, from) ?: continue
-                                    val vl = l.getLineForOffset(start.coerceAtMost(l.layoutInput.text.length))
+                                    val vl = l.getLineForOffset(preview.toShown(start).coerceAtMost(l.layoutInput.text.length))
                                     val cy = padTop + (l.getLineTop(vl) + l.getLineBottom(vl)) / 2
                                     drawPath(foldArrow(gutter / 2, cy, with(density) { 4.dp.toPx() }, from in folded), muted)
                                 }
@@ -362,7 +362,7 @@ class EditorActivity : ComponentActivity() {
                                     val up = waitForUpOrCancellation(PointerEventPass.Initial) ?: return@awaitEachGesture
                                     up.consume()
                                     val l = layout ?: return@awaitEachGesture
-                                    val offset = l.getOffsetForPosition(Offset(gutter, up.position.y - padTop))
+                                    val offset = preview.toText(l.getOffsetForPosition(Offset(gutter, up.position.y - padTop)))
                                     val line = value.text.substring(0, offset.coerceAtMost(value.text.length)).count { it == '\n' }
                                     if (line in regions) {
                                         tick()
@@ -385,7 +385,7 @@ class EditorActivity : ComponentActivity() {
             val l = layout ?: return@LaunchedEffect
             if (!scrollToCursor || !loaded) return@LaunchedEffect
             // A quarter of the way down, so the line stays in view once the keyboard opens.
-            val top = l.getCursorRect(value.selection.start.coerceIn(0, l.layoutInput.text.length)).top
+            val top = l.getCursorRect(preview.toShown(value.selection.start).coerceIn(0, l.layoutInput.text.length)).top
             scroll.scrollTo((top - scroll.viewportSize / 4).toInt().coerceAtLeast(0))
             scrollToCursor = false
         }
@@ -449,15 +449,15 @@ class EditorActivity : ComponentActivity() {
      * with the theme's border, and the type's icon beside the title.
      */
     private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawCallouts(
-        l: TextLayoutResult, text: String, boxes: List<LivePreview.Companion.CalloutBox>,
+        l: TextLayoutResult, text: String, preview: LivePreview, boxes: List<LivePreview.Companion.CalloutBox>,
         top: Float, left: Float, right: Float, em: Float, p: Palette,
     ) {
         val length = l.layoutInput.text.length
         val radius = p.calloutRadius * em / 16
         for (box in boxes) {
-            val from = lineStart(text, box.from)?.coerceAtMost(length) ?: continue
-            val toStart = lineStart(text, box.to)?.coerceAtMost(length) ?: continue
-            val toEnd = text.indexOf('\n', toStart).let { if (it < 0) text.length else it }.coerceAtMost(length)
+            val from = lineStart(text, box.from)?.let(preview::toShown)?.coerceAtMost(length) ?: continue
+            val toStart = lineStart(text, box.to) ?: continue
+            val toEnd = preview.toShown(text.indexOf('\n', toStart).let { if (it < 0) text.length else it }).coerceAtMost(length)
             val titleLine = l.getLineForOffset(from)
             val y0 = top + l.getLineTop(titleLine)
             // The text has no room for padding below the last line, so the box takes some of the gap after it.

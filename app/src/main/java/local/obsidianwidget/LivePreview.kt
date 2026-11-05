@@ -32,12 +32,48 @@ class LivePreview(
     private val active: IntRange,
     /** Cursor offset; a list marker it sits in is shown as typed so it can be edited. */
     private val cursor: Int,
-    /** Lines inside folded regions, collapsed to nothing. */
+    /** Lines inside folded regions, left out of what's shown. */
     private val collapsed: Set<Int> = emptySet(),
 ) : VisualTransformation {
 
-    override fun filter(text: AnnotatedString): TransformedText =
-        TransformedText(annotate(text.text), OffsetMapping.Identity)
+    override fun filter(text: AnnotatedString): TransformedText {
+        val shown = annotate(text.text)
+        val cut = removed
+        return TransformedText(shown, object : OffsetMapping {
+            override fun originalToTransformed(offset: Int) = toShown(cut, offset)
+            override fun transformedToOriginal(offset: Int) = toText(cut, offset)
+        })
+    }
+
+    /**
+     * The stretches of the text left out of what's shown, folded lines, as [start, end) pairs in
+     * order; from the last [annotate].
+     */
+    @Volatile private var removed = IntArray(0)
+
+    /** Where [offset] in the text is in what's shown; inside folded lines, where they were. */
+    fun toShown(offset: Int) = toShown(removed, offset)
+
+    /** Where [offset] in what's shown is in the text. */
+    fun toText(offset: Int) = toText(removed, offset)
+
+    private fun toShown(cut: IntArray, offset: Int): Int {
+        var shift = 0
+        for (k in cut.indices step 2) {
+            if (offset >= cut[k + 1]) shift += cut[k + 1] - cut[k]
+            else if (offset > cut[k]) return cut[k] - shift
+            else break
+        }
+        return offset - shift
+    }
+
+    private fun toText(cut: IntArray, offset: Int): Int {
+        var shift = 0
+        for (k in cut.indices step 2) {
+            if (offset > cut[k] - shift) shift += cut[k + 1] - cut[k] else break
+        }
+        return offset + shift
+    }
 
     private val hidden = SpanStyle(color = Color.Transparent, fontSize = 0.01.sp, letterSpacing = 0.sp)
     private val faint = SpanStyle(color = Color(p.faint))
@@ -61,6 +97,12 @@ class LivePreview(
     fun annotate(text: String): AnnotatedString {
         val lines = text.split('\n')
         val out = AnnotatedString.Builder(text.length)
+        val cut = ArrayList<Int>()
+        // Each shown line's paragraph styles (callouts), applied once its line break is in, so they
+        // take it in: one that stopped short left the break a paragraph of its own, an empty line.
+        var pending: List<AnnotatedString.Range<ParagraphStyle>> = emptyList()
+        var pendingStart = 0
+        var shownAny = false
         var ctx = Ctx(null, lines.firstOrNull()?.trim() == "---", null, false, true)
         var offset = 0
         for ((i, raw) in lines.withIndex()) {
@@ -72,22 +114,27 @@ class LivePreview(
             val styled = synchronized(cache) { cache[key] } ?: styleLine(line, ctx, on, cursorCol, nextIsRule).also {
                 synchronized(cache) { cache[key] = it }
             }
-            val start = out.length
             if (i in collapsed) {
-                // Folded away: the line and its line break shrink to nothing.
-                out.append(line)
+                // Folded away: left out of what's shown, with its line break (or, at the end of the
+                // note, the break before it).
+                val to = minOf(text.length, offset + raw.length + 1)
+                if (cut.isNotEmpty() && cut.last() == offset) cut[cut.lastIndex] = to else { cut.add(offset); cut.add(to) }
+                if (i == lines.lastIndex && cut[cut.lastIndex - 1] > 0) cut[cut.lastIndex - 1]--
             } else {
-                out.append(styled.text)
-            }
-            if (raw.length > line.length) out.append("\r")
-            if (i < lines.lastIndex) out.append('\n')
-            if (i in collapsed && out.length > start) {
-                out.addStyle(hidden, start, out.length)
-                out.addStyle(ParagraphStyle(lineHeight = 0.1.sp), start, out.length)
+                // The line break before this line, which belongs to the line shown before it.
+                if (shownAny) out.append('\n')
+                for (ps in pending) out.addStyle(ps.item, pendingStart + ps.start, out.length)
+                shownAny = true
+                pendingStart = out.length
+                out.append(AnnotatedString(styled.text.text, styled.text.spanStyles))
+                if (raw.length > line.length) out.append("\r")
+                pending = styled.text.paragraphStyles
             }
             ctx = styled.next.copy(first = false)
             offset += raw.length + 1
         }
+        for (ps in pending) out.addStyle(ps.item, pendingStart + ps.start, out.length)
+        removed = cut.toIntArray()
         return out.toAnnotatedString()
     }
 
@@ -351,7 +398,8 @@ class LivePreview(
                     if (j !in collapsed) to = j
                     j++
                 }
-                out.add(CalloutBox(i, to, p.calloutColor(type), Callouts.kind(type).icon))
+                // One inside a folded section isn't shown at all.
+                if (i !in collapsed) out.add(CalloutBox(i, to, p.calloutColor(type), Callouts.kind(type).icon))
                 i = j
             }
             return out
