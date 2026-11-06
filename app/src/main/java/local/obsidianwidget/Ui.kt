@@ -459,7 +459,7 @@ fun ThemeSwatch(p: Palette?, modifier: Modifier = Modifier.size(width = 46.dp, h
 
 /** A search box on a rounded track, like the pill pickers. */
 @Composable
-fun SearchField(value: String, onChange: (String) -> Unit, placeholder: String, modifier: Modifier = Modifier) {
+fun SearchField(value: String, onChange: (String) -> Unit, placeholder: String, modifier: Modifier = Modifier, onGo: (() -> Unit)? = null) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = modifier
@@ -479,6 +479,8 @@ fun SearchField(value: String, onChange: (String) -> Unit, placeholder: String, 
                 singleLine = true,
                 textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
                 cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = if (onGo != null) androidx.compose.ui.text.input.ImeAction.Go else androidx.compose.ui.text.input.ImeAction.Default),
+                keyboardActions = androidx.compose.foundation.text.KeyboardActions(onGo = { onGo?.invoke() }),
                 modifier = Modifier.fillMaxWidth(),
             )
         }

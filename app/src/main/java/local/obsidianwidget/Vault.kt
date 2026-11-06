@@ -47,7 +47,25 @@ object Vault {
     }
 
     /** Every markdown note in the vault, skipping hidden folders such as .obsidian and .trash. */
-    fun notes(ctx: Context, tree: Uri): List<Note> {
+    /**
+     * The vault's notes as last listed, kept in the cache folder: listing a big vault through the
+     * storage framework takes a while, so the picker shows these at once and then the fresh list.
+     */
+    fun cachedNotes(ctx: Context, tree: Uri): List<Note>? = runCatching {
+        val a = org.json.JSONArray(java.io.File(ctx.cacheDir, "notes-${tree.toString().hashCode().toUInt()}.json").readText())
+        List(a.length()) { i -> a.getJSONObject(i).let { Note(it.getString("p"), Uri.parse(it.getString("u")), it.getLong("m")) } }
+    }.getOrNull()
+
+    /** All the vault's notes, listed afresh, and remembered for [cachedNotes]. */
+    fun notes(ctx: Context, tree: Uri): List<Note> = listNotes(ctx, tree).also { notes ->
+        runCatching {
+            val a = org.json.JSONArray()
+            for (n in notes) a.put(org.json.JSONObject().put("p", n.path).put("u", n.uri.toString()).put("m", n.modified))
+            java.io.File(ctx.cacheDir, "notes-${tree.toString().hashCode().toUInt()}.json").writeText(a.toString())
+        }
+    }
+
+    private fun listNotes(ctx: Context, tree: Uri): List<Note> {
         val out = ArrayList<Note>()
         val pending = ArrayDeque(listOf(DocumentsContract.getTreeDocumentId(tree) to ""))
         while (pending.isNotEmpty()) {

@@ -157,7 +157,7 @@ class ConfigActivity : ComponentActivity() {
 
         LaunchedEffect(vault) {
             val tree = vault?.let(Uri::parse) ?: return@LaunchedEffect
-            notes = null
+            notes = withContext(Dispatchers.IO) { Vault.cachedNotes(this@ConfigActivity, tree)?.sortedByDescending { it.modified } }
             withContext(Dispatchers.IO) {
                 themes = Vault.themes(this@ConfigActivity, tree)
                 vaultTheme = Vault.appearance(this@ConfigActivity, tree)?.optString("cssTheme").orEmpty()
@@ -404,59 +404,114 @@ class ConfigActivity : ComponentActivity() {
     private fun NotePicker(notes: List<Note>?, current: String?, onBack: () -> Unit, onPick: (Note) -> Unit) {
         var query by remember { mutableStateOf("") }
         val tick = rememberHaptic()
+        // Opened onto the current note's folder, as Obsidian reveals the open file.
+        val currentPath = notes?.firstOrNull { it.uri.toString() == current }?.path
+        var open by remember(currentPath) { mutableStateOf(currentPath?.let(NoteTree::ancestors).orEmpty()) }
+        val accent = MaterialTheme.colorScheme.primary
+        val guide = MaterialTheme.colorScheme.outlineVariant
         Scaffold(
             containerColor = MaterialTheme.colorScheme.background,
             topBar = { PageHeader("Choose a note", onBack) },
         ) { pad ->
             Column(Modifier.fillMaxSize().padding(pad)) {
-                SearchField(query, { query = it }, "Search notes", Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+                val hits = remember(notes, query) { notes?.let { NoteTree.search(it, query) }.orEmpty() }
+                SearchField(
+                    query, { query = it }, "Search notes", Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                    // Enter picks the best match, as in Obsidian's quick switcher.
+                    onGo = { hits.firstOrNull()?.let { tick(); onPick(it.note) } },
+                )
                 if (notes == null) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
                     return@Column
                 }
-                val words = query.lowercase().split(' ').filter { it.isNotEmpty() }
-                val shown = notes.filter { n -> words.all { n.path.lowercase().contains(it) } }
-                if (shown.isEmpty()) {
+                if (notes.isEmpty() || (query.isNotBlank() && hits.isEmpty())) {
                     Text(
                         if (notes.isEmpty()) "No notes found in this vault." else "No matches.",
                         Modifier.padding(24.dp), color = noteColor(),
                     )
                 }
+                val step = 20.dp
                 LazyColumn(
-                    contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 24.dp),
-                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                    contentPadding = PaddingValues(start = 8.dp, end = 12.dp, top = 4.dp, bottom = 24.dp),
                     modifier = Modifier.navigationBarsPadding(),
                 ) {
-                    items(shown, key = { it.path }) { n ->
-                        val on = n.uri.toString() == current
-                        val accent = MaterialTheme.colorScheme.primary
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(16.dp))
-                                .background(if (on) accent.copy(alpha = 0.14f) else Color.Transparent)
-                                .clickable { tick(); onPick(n) }
-                                .padding(horizontal = 8.dp, vertical = 10.dp),
-                        ) {
-                            IconTile(R.drawable.ic_note, size = 36.dp, tint = if (on) accent else MaterialTheme.colorScheme.onSurfaceVariant)
-                            Spacer(Modifier.width(12.dp))
-                            Column(Modifier.weight(1f)) {
-                                Text(
-                                    n.title, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                                    color = if (on) accent else MaterialTheme.colorScheme.onSurface,
-                                    fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal,
-                                )
-                                val folder = n.path.substringBeforeLast('/', "")
-                                if (folder.isNotEmpty()) {
-                                    Text(folder, style = MaterialTheme.typography.bodySmall, color = noteColor(), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    if (query.isNotBlank()) {
+                        // Searching: the matches, best first, with the letters that matched in the accent colour.
+                        items(hits, key = { it.note.path }) { hit ->
+                            val n = hit.note
+                            val on = n.uri.toString() == current
+                            val title = androidx.compose.ui.text.buildAnnotatedString {
+                                append(n.title)
+                                for (i in hit.matched) addStyle(androidx.compose.ui.text.SpanStyle(color = accent, fontWeight = FontWeight.Bold), i, i + 1)
+                            }
+                            PickerRow(on, onClick = { tick(); onPick(n) }) {
+                                Icon(painterResource(R.drawable.ic_note), null, tint = if (on) accent else MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
+                                Spacer(Modifier.width(10.dp))
+                                Column(Modifier.weight(1f)) {
+                                    Text(title, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis, color = if (on) accent else MaterialTheme.colorScheme.onSurface)
+                                    val folder = n.path.substringBeforeLast('/', "")
+                                    if (folder.isNotEmpty()) Text(folder, style = MaterialTheme.typography.bodySmall, color = noteColor(), maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 }
                             }
-                            if (on) Icon(painterResource(R.drawable.ic_check), "Current note", tint = accent, modifier = Modifier.size(20.dp))
+                        }
+                    } else {
+                        // The vault's folders, as in Obsidian's file explorer.
+                        items(NoteTree.rows(notes, open), key = { e -> if (e is NoteTree.Folder) "d:" + e.path else "f:" + (e as NoteTree.File).note.path }) { e ->
+                            val indent = Modifier.drawBehind {
+                                // Indent guides, one per level, as Obsidian draws them.
+                                for (d in 0 until e.depth) {
+                                    val x = (step * d + 17.dp).toPx()
+                                    drawRect(guide, androidx.compose.ui.geometry.Offset(x, 0f), androidx.compose.ui.geometry.Size(1.dp.toPx(), size.height))
+                                }
+                            }
+                            when (e) {
+                                is NoteTree.Folder -> PickerRow(false, indent, onClick = {
+                                    tick()
+                                    open = if (e.open) open - e.path else open + e.path
+                                }) {
+                                    Spacer(Modifier.width(step * e.depth))
+                                    Icon(
+                                        painterResource(R.drawable.ic_chevron_right), if (e.open) "Collapse" else "Expand",
+                                        tint = noteColor(),
+                                        modifier = Modifier.size(18.dp).graphicsLayer { rotationZ = if (e.open) 90f else 0f },
+                                    )
+                                    Spacer(Modifier.width(6.dp))
+                                    Text(e.name, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurface)
+                                }
+                                is NoteTree.File -> {
+                                    val on = e.note.uri.toString() == current
+                                    PickerRow(on, indent, onClick = { tick(); onPick(e.note) }) {
+                                        Spacer(Modifier.width(step * e.depth + 24.dp))
+                                        Text(
+                                            e.note.title, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                            color = if (on) accent else MaterialTheme.colorScheme.onSurface,
+                                            fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal,
+                                            modifier = Modifier.weight(1f),
+                                        )
+                                        if (on) Icon(painterResource(R.drawable.ic_check), "Current note", tint = accent, modifier = Modifier.size(18.dp))
+                                    }
+                                }
+                            }
                         }
                     }
                 }
             }
         }
+    }
+
+    /** A line of the note picker: the current note shaded in the accent colour. */
+    @Composable
+    private fun PickerRow(on: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit, content: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = modifier
+                .fillMaxWidth()
+                .heightIn(min = 44.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(if (on) MaterialTheme.colorScheme.primary.copy(alpha = 0.14f) else Color.Transparent)
+                .clickable(onClick = onClick)
+                .padding(horizontal = 8.dp, vertical = 6.dp),
+            content = content,
+        )
     }
 }
