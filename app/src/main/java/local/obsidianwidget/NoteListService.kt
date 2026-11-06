@@ -34,6 +34,8 @@ object NoteRows {
         val fold: Int = -1, val folded: Boolean = false,
         /** For a task, its line as written, so a tick can find it if the note changed since. */
         val source: String? = null,
+        /** For a strip beside a task's checkbox, the box's middle, in px across the strip; else -1. */
+        val boxX: Int = -1,
     )
 
     /** One block laid out on the note's tall imaginary canvas, [top] to [top] + [height]. */
@@ -257,10 +259,17 @@ object NoteRows {
             // Taps go to the block under the strip's middle.
             val mid = top + strip / 2
             val under = pieces.firstOrNull { mid < it.top + it.height } ?: pieces.last()
+            // A task's checkbox ("☐ ", its first character) sits on its first row of text.
+            val boxX = under.layout?.takeIf { under.block.task }?.let { l ->
+                val (rowTop, rowBottom) = firstRow(under)
+                if (rowBottom <= top || rowTop >= top + strip) -1
+                else gutter + under.textX + ((l.getPrimaryHorizontal(0) + l.getPrimaryHorizontal(1)) / 2).toInt()
+            } ?: -1
             Row(
                 compress(bmp), under.block.line, under.block.task, spoken(pieces, top, top + strip),
                 fold?.block?.line ?: -1, fold?.block?.fold == Block.FOLDED,
                 if (under.block.task) sourceLines?.getOrNull(under.block.line)?.removeSuffix("\r") else null,
+                boxX,
             )
         }
         return rows
@@ -402,7 +411,8 @@ object NoteRows {
                         val image = ByteArray(input.readInt()).also(input::readFully)
                         val fold = input.readInt()
                         val folded = input.readBoolean()
-                        Row(image, line, task, text, fold, folded, if (input.readBoolean()) input.readUTF() else null)
+                        val source = if (input.readBoolean()) input.readUTF() else null
+                        Row(image, line, task, text, fold, folded, source, input.readInt())
                     }
                 }
             }.getOrNull()?.also { memory["$id/$dark/$key"] = it }
@@ -428,6 +438,7 @@ object NoteRows {
                     out.writeBoolean(r.folded)
                     out.writeBoolean(r.source != null)
                     r.source?.let { out.writeUTF(it.take(8000)) }
+                    out.writeInt(r.boxX)
                 }
             }
             tmp.renameTo(file)
@@ -441,8 +452,12 @@ object NoteRows {
         }
     }
 
-    /** One row's view; with [night], the launcher shows that one instead while in dark mode. */
-    fun view(ctx: Context, row: Row, night: Row? = null): RemoteViews = RemoteViews(ctx.packageName, R.layout.widget_item).apply {
+    /**
+     * One row's view; with [night], the launcher shows that one instead while in dark mode. In
+     * [reading] mode a tap anywhere on a task ticks it; otherwise only on its checkbox, and the rest
+     * of the line opens the editor there.
+     */
+    fun view(ctx: Context, row: Row, night: Row? = null, reading: Boolean = false): RemoteViews = RemoteViews(ctx.packageName, R.layout.widget_item).apply {
         val day = Icon.createWithData(row.image, 0, row.image.size)
         if (night != null && android.os.Build.VERSION.SDK_INT >= 31) {
             setIcon(R.id.item_img, "setImageIcon", day, Icon.createWithData(night.image, 0, night.image.size))
@@ -452,9 +467,24 @@ object NoteRows {
         row.text?.let { setContentDescription(R.id.item_img, it) }
         setOnClickFillInIntent(
             R.id.item,
-            Intent().putExtra(EditorActivity.EXTRA_LINE, row.line).putExtra(EditorActivity.EXTRA_TOGGLE, row.task)
+            Intent().putExtra(EditorActivity.EXTRA_LINE, row.line).putExtra(EditorActivity.EXTRA_TOGGLE, row.task && reading)
                 .putExtra(EditorActivity.EXTRA_SOURCE, row.source),
         )
+        if (row.task && !reading && row.boxX >= 0) {
+            // A target the size of the fold arrows' over the box, clear of the fold arrow's gutter.
+            val half = (22 * ctx.resources.displayMetrics.density).toInt()
+            val gutter = if (row.fold >= 0) (18 * ctx.resources.displayMetrics.density).toInt() else 0
+            setViewVisibility(R.id.task_hit_box, android.view.View.VISIBLE)
+            setViewPadding(R.id.task_hit_box, maxOf(gutter, row.boxX - half), 0, 0, 0)
+            setContentDescription(R.id.task_hit, "Tick")
+            setOnClickFillInIntent(
+                R.id.task_hit,
+                Intent().putExtra(EditorActivity.EXTRA_LINE, row.line).putExtra(EditorActivity.EXTRA_TOGGLE, true)
+                    .putExtra(EditorActivity.EXTRA_SOURCE, row.source),
+            )
+        } else {
+            setViewVisibility(R.id.task_hit_box, android.view.View.GONE)
+        }
         // The gutter over a fold arrow folds or unfolds, rather than opening the editor.
         if (row.fold >= 0) {
             setViewVisibility(R.id.fold_hit, android.view.View.VISIBLE)
@@ -497,6 +527,7 @@ object NoteRows {
             views.setImageViewBitmap(R.id.item_img, bmp)
         }
         views.setViewVisibility(R.id.fold_hit, android.view.View.GONE)
+        views.setViewVisibility(R.id.task_hit_box, android.view.View.GONE)
         return views
     }
 
@@ -535,8 +566,10 @@ class NoteListService : RemoteViewsService() {
         private var rows: List<NoteRows.Row> = emptyList()
         private var night: List<NoteRows.Row>? = null
         private var ids = LongArray(0)
+        private var reading = false
 
         override fun onDataSetChanged() {
+            reading = WidgetStore.load(ctx, id)?.readOnly == true
             val built = NoteRows.build(ctx, id)
             rows = built?.rows.orEmpty()
             night = built?.night
@@ -544,7 +577,7 @@ class NoteListService : RemoteViewsService() {
         }
 
         override fun getViewAt(position: Int): RemoteViews =
-            rows.getOrNull(position)?.let { NoteRows.view(ctx, it, night?.getOrNull(position)) }
+            rows.getOrNull(position)?.let { NoteRows.view(ctx, it, night?.getOrNull(position), reading) }
                 ?: RemoteViews(ctx.packageName, R.layout.widget_item)
 
         override fun getCount() = rows.size

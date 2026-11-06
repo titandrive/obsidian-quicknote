@@ -181,7 +181,7 @@ class NoteWidgetProvider : AppWidgetProvider() {
             if (inline && android.os.Build.VERSION.SDK_INT >= 31) {
                 val items = RemoteViews.RemoteCollectionItems.Builder().setHasStableIds(true).setViewTypeCount(1)
                 val ids = NoteRows.ids(rows!!.rows)
-                rows.rows.forEachIndexed { i, row -> items.addItem(ids[i], NoteRows.view(ctx, row, rows.night?.getOrNull(i))) }
+                rows.rows.forEachIndexed { i, row -> items.addItem(ids[i], NoteRows.view(ctx, row, rows.night?.getOrNull(i), cfg.readOnly)) }
                 views.setRemoteAdapter(R.id.list, items.build())
                 routes.edit().putBoolean("inline$id", true).apply()
             } else {

@@ -13,6 +13,22 @@
         android:scaleType="fitStart" />
 
     <!--
+        Over a task's checkbox while the widget is in edit mode: tapping it ticks the task, while the
+        rest of the line opens the editor. Its padding puts the target over the box.
+    -->
+    <FrameLayout
+        android:id="@+id/task_hit_box"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:visibility="gone">
+
+        <ImageView
+            android:id="@+id/task_hit"
+            android:layout_width="44dp"
+            android:layout_height="match_parent" />
+    </FrameLayout>
+
+    <!--
         Over the gutter beside a fold arrow, and the start of the line: tapping it folds or unfolds
         instead of editing. 48dp, the size Android recommends for touch targets.
     -->
