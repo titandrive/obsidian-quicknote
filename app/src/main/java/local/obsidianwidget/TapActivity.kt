@@ -46,7 +46,7 @@ class TapActivity : Activity() {
                 val app = applicationContext
                 thread {
                     val cfg = WidgetStore.load(app, id)?.takeIf { it.swaps } ?: return@thread
-                    Folds.swap(app, id, cfg.notePath, cfg.altNotePath)
+                    Folds.swap(app, id, cfg.notePath, cfg.next().path)
                     WidgetStore.save(app, id, cfg.swapped())
                     NoteWidgetProvider.update(app, AppWidgetManager.getInstance(app), id)
                 }

@@ -249,11 +249,11 @@ class NoteWidgetProvider : AppWidgetProvider() {
             views.setOnClickPendingIntent(R.id.btn_edit, edit)
             views.setOnClickPendingIntent(R.id.empty, edit)
             // The note's name switches notes; the cog has the rest of the settings.
-            // The note's name switches notes: to the other one when switching between two, else through the picker.
+            // The note's name switches notes: to the next one when swapping between them, else through the picker.
             views.setOnClickPendingIntent(
                 R.id.title,
                 if (cfg.swaps) activity(ctx, id, 8, tapIntent(ctx, id, "swap").putExtra(TapActivity.EXTRA_SWAP, true))
-                // Swapping on, but nothing to swap with yet: pick the second note.
+                // Swapping on, but nothing to swap with yet: pick a note to add.
                 else activity(ctx, id, 3, tapIntent(ctx, id, "pick").putExtra(TapActivity.EXTRA_FORWARD, configIntent(ctx, id, pickOnly = true, pickAlt = cfg.switchNotes))),
             )
             views.setOnClickPendingIntent(R.id.btn_settings, activity(ctx, id, 4, tapIntent(ctx, id, "settings").putExtra(TapActivity.EXTRA_FORWARD, configIntent(ctx, id, pickOnly = false))))

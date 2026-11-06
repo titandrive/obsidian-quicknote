@@ -30,16 +30,24 @@ data class WidgetConfig(
     /** Whether the popup shows the button for source mode, and whether it's in source mode (raw markdown). */
     val showSourceButton: Boolean = true,
     val sourceMode: Boolean = false,
-    /** Switching between two notes: tapping the note's name swaps in [altNoteUri] instead of picking one. */
+    /**
+     * Swapping notes: tapping the note's name shows the next of [swapNotes] (up to [MAX_SWAP], in
+     * order, the shown one among them) instead of picking one.
+     */
     val switchNotes: Boolean = false,
-    val altNoteUri: String = "",
-    val altNotePath: String = "",
+    val swapNotes: List<SwapNote> = emptyList(),
 ) {
     /** Whether tapping the note's name swaps notes. */
-    val swaps: Boolean get() = switchNotes && altNoteUri.isNotEmpty()
+    val swaps: Boolean get() = switchNotes && swapNotes.size >= 2
 
-    /** The same widget showing its other note. */
-    fun swapped() = copy(noteUri = altNoteUri, notePath = altNotePath, altNoteUri = noteUri, altNotePath = notePath)
+    /** The note after the shown one in [swapNotes], round to the first again. */
+    fun next(): SwapNote {
+        val at = swapNotes.indexOfFirst { it.uri == noteUri }
+        return swapNotes[(at + 1) % swapNotes.size]
+    }
+
+    /** The same widget showing the next of its notes. */
+    fun swapped() = next().let { copy(noteUri = it.uri, notePath = it.path) }
 
     val vaultTree: Uri get() = Uri.parse(vault)
 
@@ -75,7 +83,8 @@ data class WidgetConfig(
         .put("vault", vault).put("vaultName", vaultName).put("checkMinutes", checkMinutes).put("showToolbar", showToolbar)
         .put("readOnly", readOnly).put("showSettings", showSettings)
         .put("showSourceButton", showSourceButton).put("sourceMode", sourceMode)
-        .put("switchNotes", switchNotes).put("altNoteUri", altNoteUri).put("altNotePath", altNotePath)
+        .put("switchNotes", switchNotes)
+        .put("swapNotes", org.json.JSONArray().apply { swapNotes.forEach { put(JSONObject().put("uri", it.uri).put("path", it.path)) } })
         .apply {
             colors?.let {
                 put("dark", it.dark.toJson()).put("light", it.light.toJson()).put("vaultMode", it.vaultMode).put("vaultFont", it.font)
@@ -83,6 +92,18 @@ data class WidgetConfig(
         }
 
     companion object {
+        const val MAX_SWAP = 5
+
+        /** The notes to swap between; saved before there could be more than two, it's the note and its other one. */
+        private fun swapNotes(o: JSONObject): List<SwapNote> {
+            o.optJSONArray("swapNotes")?.let { a ->
+                return (0 until a.length()).map { a.getJSONObject(it) }.map { SwapNote(it.getString("uri"), it.getString("path")) }
+            }
+            val alt = o.optString("altNoteUri")
+            return if (alt.isEmpty()) emptyList()
+            else listOf(SwapNote(o.getString("noteUri"), o.getString("notePath")), SwapNote(alt, o.optString("altNotePath")))
+        }
+
         fun fromJson(o: JSONObject) = WidgetConfig(
             o.getString("noteUri"), o.getString("notePath"), o.optString("theme", ObsidianTheme.THEME_VAULT),
             o.optString("mode", "vault"), o.optInt("opacity", 100), o.optDouble("textSize", 14.0).toFloat(),
@@ -95,9 +116,14 @@ data class WidgetConfig(
             o.optInt("checkMinutes", 30), o.optBoolean("showToolbar", true), o.optBoolean("readOnly", false),
             o.optBoolean("showSettings", true),
             o.optBoolean("showSourceButton", true), o.optBoolean("sourceMode", false),
-            o.optBoolean("switchNotes", false), o.optString("altNoteUri"), o.optString("altNotePath"),
+            o.optBoolean("switchNotes", false), swapNotes(o),
         )
     }
+}
+
+/** One of the notes a widget swaps between. */
+data class SwapNote(val uri: String, val path: String) {
+    val title: String get() = path.substringAfterLast('/').removeSuffix(".md")
 }
 
 object WidgetStore {

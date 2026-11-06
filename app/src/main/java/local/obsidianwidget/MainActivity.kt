@@ -91,7 +91,7 @@ class MainActivity : ComponentActivity() {
                                 if (i > 0) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                                 NavRow(
                                     title = cfg.title.ifEmpty { "No note chosen" },
-                                    subtitle = if (cfg.swaps) "Swaps with " + cfg.altNotePath.substringAfterLast('/').removeSuffix(".md")
+                                    subtitle = if (cfg.swaps) "Swaps with " + cfg.swapNotes.filter { it.uri != cfg.noteUri }.joinToString(", ") { it.title }
                                     else Vault.displayPath(cfg.vaultTree),
                                     leading = { IconTile(R.drawable.ic_note, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
                                     onClick = { startActivity(NoteWidgetProvider.configIntent(this@MainActivity, id, pickOnly = false)) },

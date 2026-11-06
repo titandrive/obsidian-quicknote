@@ -52,6 +52,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.zIndex
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.key
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
@@ -104,8 +111,8 @@ class ConfigActivity : ComponentActivity() {
     private suspend fun save(cfg: WidgetConfig) {
         val full = if (cfg.colors != null) cfg
         else cfg.copy(colors = withContext(Dispatchers.IO) { ObsidianTheme.load(this@ConfigActivity, cfg.vaultTree, cfg.theme) })
-        // Folds belong to the note; a different note starts unfolded.
-        if (WidgetStore.load(this, widgetId)?.noteUri != full.noteUri) Folds.forget(this, widgetId)
+        // Folds belong to the note: a different note brings back its own, as swapping does.
+        WidgetStore.load(this, widgetId)?.takeIf { it.noteUri != full.noteUri }?.let { Folds.swap(this, widgetId, it.notePath, full.notePath) }
         WidgetStore.save(this, widgetId, full)
         ChangeCheck.schedule(this, widgetId)
         withContext(Dispatchers.IO) { NoteWidgetProvider.update(this@ConfigActivity, AppWidgetManager.getInstance(this@ConfigActivity), widgetId) }
@@ -139,9 +146,9 @@ class ConfigActivity : ComponentActivity() {
         var noteText by remember { mutableStateOf<String?>(null) }
         var picking by remember { mutableStateOf(pickOnly) }
         var switchNotes by remember { mutableStateOf(existing?.switchNotes ?: false) }
-        var altNotePath by remember { mutableStateOf(existing?.altNotePath.orEmpty()) }
-        var altNoteUri by remember { mutableStateOf(existing?.altNoteUri.orEmpty()) }
-        var pickingAlt by remember { mutableStateOf(pickAltOnly) }
+        var swapNotes by remember { mutableStateOf(existing?.swapNotes.orEmpty()) }
+        // Picking a note to swap between: which one it replaces, or -1 to add one.
+        var pickingSwap by remember { mutableStateOf(if (pickAltOnly) -1 else null) }
         var pickingTheme by remember { mutableStateOf(false) }
         var previewBounds by remember { mutableStateOf<Rect?>(null) }
 
@@ -159,8 +166,7 @@ class ConfigActivity : ComponentActivity() {
                 vaultName = name
                 notePath = null
                 noteUri = null
-                altNotePath = ""
-                altNoteUri = ""
+                swapNotes = emptyList()
                 swatches.clear()
             }
         }
@@ -192,14 +198,16 @@ class ConfigActivity : ComponentActivity() {
             noteText = noteUri?.let { u -> withContext(Dispatchers.IO) { Vault.read(this@ConfigActivity, android.net.Uri.parse(u)) } }
         }
 
+        // While swapping, the note shown is always one of those swapped between.
+        fun shown() = swapNotes.takeIf { switchNotes }?.let { list -> list.firstOrNull { it.uri == noteUri } ?: list.firstOrNull() }
         fun current() = WidgetConfig(
-            noteUri = noteUri.orEmpty(), notePath = notePath.orEmpty(), theme = theme, mode = mode,
+            noteUri = shown()?.uri ?: noteUri.orEmpty(), notePath = shown()?.path ?: notePath.orEmpty(), theme = theme, mode = mode,
             opacity = opacity, textSize = textSize, colors = colors, showHeader = showHeader,
             vault = vault.orEmpty(), vaultName = vaultName.orEmpty(), checkMinutes = checkMinutes,
             showToolbar = existing?.showToolbar ?: true,
             readOnly = existing?.readOnly ?: false, showSettings = showSettings,
             showSourceButton = showSourceButton, sourceMode = (existing?.sourceMode ?: false) && showSourceButton,
-            switchNotes = switchNotes, altNoteUri = altNoteUri, altNotePath = altNotePath,
+            switchNotes = switchNotes, swapNotes = swapNotes,
         )
         val cfg = current()
 
@@ -215,12 +223,21 @@ class ConfigActivity : ComponentActivity() {
                 }
                 return@AppTheme
             }
-            if (pickingAlt) {
-                BackHandler { if (pickAltOnly) finish() else pickingAlt = false }
-                NotePicker(notes, altNoteUri, onBack = { if (pickAltOnly) finish() else pickingAlt = false }, title = "Choose secondary note") { note ->
-                    altNotePath = note.path
-                    altNoteUri = note.uri.toString()
-                    if (pickAltOnly) scope.launch { save(current()) } else pickingAlt = false
+            pickingSwap?.let { at ->
+                val done = { if (pickAltOnly) finish() else pickingSwap = null }
+                BackHandler { done() }
+                NotePicker(notes, swapNotes.getOrNull(at)?.uri, onBack = done, title = if (at < 0) "Add a note to swap" else "Choose a note to swap") { note ->
+                    val picked = SwapNote(note.uri.toString(), note.path)
+                    // The note shown is always among them, first if the list was empty.
+                    if (swapNotes.isEmpty()) swapNotes = listOfNotNull(noteUri?.let { SwapNote(it, notePath.orEmpty()) })
+                    // A note already in the list stays where it is.
+                    if (swapNotes.none { it.uri == picked.uri }) {
+                        val was = swapNotes.getOrNull(at)
+                        swapNotes = if (at < 0) swapNotes + picked else swapNotes.toMutableList().apply { set(at, picked) }
+                        // Replacing the note shown shows the new one instead.
+                        if (was != null && was.uri == noteUri) { noteUri = picked.uri; notePath = picked.path }
+                    }
+                    if (pickAltOnly) scope.launch { save(current()) } else pickingSwap = null
                 }
                 return@AppTheme
             }
@@ -307,16 +324,21 @@ class ConfigActivity : ComponentActivity() {
                                 onClick = { pickVault.launch(null) },
                             )
                             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                            NavRow(
+                            // While swapping, the list below has the notes instead.
+                            if (!switchNotes) NavRow(
                                 title = notePath?.substringAfterLast('/')?.removeSuffix(".md") ?: "Choose a note",
-                                subtitle = if (switchNotes) "Primary note" else null,
+                                subtitle = null,
                                 onClick = { picking = true },
                             )
-                            SwitchRow("Swap notes", "Tap the note's title to quickly swap between two notes", switchNotes) {
+                            SwitchRow("Swap notes", "Tap the note's title to swap through up to ${WidgetConfig.MAX_SWAP} notes in order", switchNotes) {
                                 switchNotes = it
-                                if (it && altNoteUri.isEmpty()) pickingAlt = true
+                                // Starting with the note shown, and straight on to picking the next.
+                                if (it && swapNotes.isEmpty()) {
+                                    swapNotes = listOfNotNull(noteUri?.let { u -> SwapNote(u, notePath.orEmpty()) })
+                                    pickingSwap = -1
+                                }
                             }
-                            // The note to swap with, set in under the switch so it reads as part of it.
+                            // The notes to swap between, set in under the switch so they read as part of it.
                             if (switchNotes) Box(
                                 Modifier
                                     .padding(start = 12.dp)
@@ -326,10 +348,11 @@ class ConfigActivity : ComponentActivity() {
                                     .drawBehind { drawRect(primary, size = androidx.compose.ui.geometry.Size(3.dp.toPx(), size.height)) }
                                     .padding(start = 14.dp, end = 4.dp),
                             ) {
-                                NavRow(
-                                    title = altNotePath.substringAfterLast('/').removeSuffix(".md").ifEmpty { "Choose a note to swap with" },
-                                    subtitle = "Secondary note",
-                                    onClick = { pickingAlt = true },
+                                SwapList(
+                                    swapNotes, shown = shown()?.uri,
+                                    onMove = { from, to -> swapNotes = swapNotes.toMutableList().apply { add(to, removeAt(from)) } },
+                                    onRemove = { i -> swapNotes = swapNotes.toMutableList().apply { removeAt(i) } },
+                                    onPick = { i -> pickingSwap = i },
                                 )
                             }
                         }
@@ -441,6 +464,85 @@ class ConfigActivity : ComponentActivity() {
                     }
                 }
                 NotePreview(blocks, p, cfg.textSize, Fonts.typeface(cfg.fontFile), Modifier.fillMaxWidth().padding(end = 6.dp))
+            }
+        }
+    }
+
+    /**
+     * The notes the widget swaps between, in the order it shows them: each moved by dragging its
+     * handle, changed by tapping it, or removed; and a row to add another, up to [WidgetConfig.MAX_SWAP].
+     */
+    @Composable
+    private fun SwapList(notes: List<SwapNote>, shown: String?, onMove: (Int, Int) -> Unit, onRemove: (Int) -> Unit, onPick: (Int) -> Unit) {
+        val tick = rememberHaptic()
+        val muted = MaterialTheme.colorScheme.onSurfaceVariant
+        // The drag outlives recompositions, so it reads the list and the mover as they are now.
+        val latest by rememberUpdatedState(notes)
+        val move by rememberUpdatedState(onMove)
+        // The row being dragged, by its note, and how far it's been dragged from where it sits now.
+        var dragging by remember { mutableStateOf<String?>(null) }
+        var offset by remember { mutableFloatStateOf(0f) }
+        val heights = remember { mutableStateMapOf<String, Int>() }
+        Column {
+            notes.forEachIndexed { i, note ->
+                key(note.uri) {
+                    val lifted = dragging == note.uri
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .onSizeChanged { heights[note.uri] = it.height }
+                            .zIndex(if (lifted) 1f else 0f)
+                            .graphicsLayer { translationY = if (lifted) offset else 0f }
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(if (lifted) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent)
+                            .clickable { tick(); onPick(i) }
+                            .padding(vertical = 4.dp),
+                    ) {
+                        Icon(
+                            painterResource(R.drawable.ic_grip), "Drag to reorder", tint = muted,
+                            modifier = Modifier
+                                .size(40.dp)
+                                .pointerInput(note.uri) {
+                                    val drop = { dragging = null; offset = 0f }
+                                    detectVerticalDragGestures(
+                                        onDragStart = { dragging = note.uri; offset = 0f; tick() },
+                                        onDragEnd = drop, onDragCancel = drop,
+                                    ) { change, dy ->
+                                        change.consume()
+                                        offset += dy
+                                        // Past half of the row next to it, the two change places.
+                                        val at = latest.indexOfFirst { it.uri == note.uri }
+                                        val below = latest.getOrNull(at + 1)?.let { heights[it.uri] }
+                                        val above = latest.getOrNull(at - 1)?.let { heights[it.uri] }
+                                        if (below != null && offset > below / 2f) { move(at, at + 1); offset -= below; tick() }
+                                        else if (above != null && offset < -above / 2f) { move(at, at - 1); offset += above; tick() }
+                                    }
+                                }
+                                .padding(10.dp),
+                        )
+                        Column(Modifier.weight(1f).padding(horizontal = 4.dp)) {
+                            Text(note.title, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            if (note.uri == shown) Text("Showing now", style = MaterialTheme.typography.bodySmall, color = noteColor())
+                        }
+                        // One note is always left, as the one shown.
+                        if (notes.size > 1) Icon(
+                            painterResource(R.drawable.ic_close), "Remove", tint = muted,
+                            modifier = Modifier.size(40.dp).clip(CircleShape).clickable { tick(); onRemove(i) }.padding(10.dp),
+                        )
+                    }
+                }
+            }
+            if (notes.size < WidgetConfig.MAX_SWAP) Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .clickable { tick(); onPick(-1) }
+                    .padding(vertical = 4.dp),
+            ) {
+                Icon(painterResource(R.drawable.ic_plus), null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(40.dp).padding(10.dp))
+                Text("Add a note", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(horizontal = 4.dp))
             }
         }
     }
