@@ -24,6 +24,17 @@ object Vault {
     private class Entry(val id: String, val name: String, val isDir: Boolean, val modified: Long, val size: Long = 0)
 
     /** The vault new widgets start with: the one picked in the app, or last picked for a widget. */
+    /**
+     * Where the vault folder is on the phone's storage, from its root, e.g. "/Obsidian/notes"; on an
+     * SD card or USB drive, after that volume's name.
+     */
+    fun displayPath(tree: Uri): String {
+        val id = runCatching { DocumentsContract.getTreeDocumentId(tree) }.getOrNull() ?: return tree.toString()
+        val volume = id.substringBefore(':')
+        val path = "/" + id.substringAfter(':', "")
+        return if (volume == "primary") path else "$volume$path"
+    }
+
     fun defaultTree(ctx: Context): Uri? = prefs(ctx).getString("tree", null)?.let(Uri::parse)
 
     fun defaultName(ctx: Context): String = prefs(ctx).getString("name", null).orEmpty()
