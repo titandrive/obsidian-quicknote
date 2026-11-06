@@ -313,7 +313,7 @@ class ConfigActivity : ComponentActivity() {
                                 "Check for changes",
                                 when {
                                     live -> "Live: Detects changes instantly. Requires All files access"
-                                    checkMinutes == 0 -> "Doesn't check for changes"
+                                    checkMinutes == 0 -> "Changes only detected manually"
                                     checkMinutes == 60 -> "Checks every hour for changes"
                                     checkMinutes > 60 -> "Checks every ${checkMinutes / 60} hours for changes"
                                     else -> "Checks every $checkMinutes minutes for changes"
