@@ -34,6 +34,12 @@ class LivePreview(
     private val cursor: Int,
     /** Lines inside folded regions, left out of what's shown. */
     private val collapsed: Set<Int> = emptySet(),
+    /**
+     * Rows of tables the editor draws as grids, by line: each one's text is hidden and its line
+     * made as tall as the drawn row. Their "|---|" rules, in [tableRules], are left out.
+     */
+    private val tableRows: Map<Int, androidx.compose.ui.unit.TextUnit> = emptyMap(),
+    private val tableRules: Set<Int> = emptySet(),
 ) : VisualTransformation {
 
     override fun filter(text: AnnotatedString): TransformedText {
@@ -114,8 +120,8 @@ class LivePreview(
             val styled = synchronized(cache) { cache[key] } ?: styleLine(line, ctx, on, cursorCol, nextIsRule).also {
                 synchronized(cache) { cache[key] = it }
             }
-            if (i in collapsed) {
-                // Folded away: left out of what's shown, with its line break (or, at the end of the
+            if (i in collapsed || i in tableRules) {
+                // Folded away (or a drawn table's rule): left out of what's shown, with its line break (or, at the end of the
                 // note, the break before it).
                 val to = minOf(text.length, offset + raw.length + 1)
                 if (cut.isNotEmpty() && cut.last() == offset) cut[cut.lastIndex] = to else { cut.add(offset); cut.add(to) }
@@ -126,9 +132,17 @@ class LivePreview(
                 for (ps in pending) out.addStyle(ps.item, pendingStart + ps.start, out.length)
                 shownAny = true
                 pendingStart = out.length
-                out.append(AnnotatedString(styled.text.text, styled.text.spanStyles))
-                if (raw.length > line.length) out.append("\r")
-                pending = styled.text.paragraphStyles
+                val rowHeight = tableRows[i]
+                if (rowHeight != null) {
+                    out.append(line)
+                    out.addStyle(hidden, pendingStart, out.length)
+                    if (raw.length > line.length) out.append("\r")
+                    pending = listOf(AnnotatedString.Range(ParagraphStyle(lineHeight = rowHeight, lineHeightStyle = LineHeightStyle(LineHeightStyle.Alignment.Center, LineHeightStyle.Trim.None)), 0, 0))
+                } else {
+                    out.append(AnnotatedString(styled.text.text, styled.text.spanStyles))
+                    if (raw.length > line.length) out.append("\r")
+                    pending = styled.text.paragraphStyles
+                }
             }
             ctx = styled.next.copy(first = false)
             offset += raw.length + 1
@@ -136,6 +150,14 @@ class LivePreview(
         for (ps in pending) out.addStyle(ps.item, pendingStart + ps.start, out.length)
         removed = cut.toIntArray()
         return out.toAnnotatedString()
+    }
+
+    /** A table cell's text styled for drawing: inline formatting, markup hidden; the header's bold. */
+    fun styleCell(cell: String, header: Boolean): AnnotatedString {
+        val b = AnnotatedString.Builder(cell)
+        if (header) b.addStyle(SpanStyle(fontWeight = FontWeight.Bold, color = Color(p.headings[0])), 0, cell.length)
+        inline(b, cell, 0, 0, cell.length, -1)
+        return b.toAnnotatedString()
     }
 
     private fun styleLine(line: String, ctx: Ctx, on: Boolean, cursorCol: Int, nextIsTableRule: Boolean): Styled {

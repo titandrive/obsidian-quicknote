@@ -77,6 +77,22 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.text.drawText
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.IntOffset
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -128,6 +144,12 @@ class EditorActivity : ComponentActivity() {
     private var savedFolds: Set<Int> = emptySet()
     /** Whether the formatting toolbar shows; remembered per widget. */
     private var showToolbar by mutableStateOf(true)
+    /** The table cell being edited, by its table's header line, row (0 the header) and column. */
+    private class CellEdit(val table: Int, val row: Int, val col: Int)
+    private var cellEdit by mutableStateOf<CellEdit?>(null)
+    /** What's in the cell being edited, as typed. */
+    private var cellValue by mutableStateOf(TextFieldValue(""))
+
     /** The vault's mobile toolbar buttons, once read. */
     private var toolbar by mutableStateOf<List<Toolbar.Command>>(emptyList())
 
@@ -179,12 +201,14 @@ class EditorActivity : ComponentActivity() {
         super.onPause()
         // Leaving by home or recents still keeps the edit, and any folding.
         if (loaded && !isFinishing) {
+            closeCell()
             if (value.text != original) save(force = true)
             saveFolds()
         }
     }
 
     private fun done() {
+        closeCell()
         if (!loaded || value.text == original || save(force = false)) {
             saveFolds()
             finish()
@@ -223,6 +247,92 @@ class EditorActivity : ComponentActivity() {
         return true
     }
 
+    private fun tableAt(start: Int) = Tables.find(value.text).firstOrNull { it.start == start }
+
+    /** Starts editing cell [c] of row [r] of table [t], saving any cell being edited first. */
+    private fun openCell(t: Tables.Table, r: Int, c: Int) {
+        closeCell()
+        val cell = Tables.unescape(t.rows[r][c])
+        cellEdit = CellEdit(t.start, r, c)
+        cellValue = TextFieldValue(cell, TextRange(cell.length))
+    }
+
+    /** Writes the cell being edited into the table, if it changed. */
+    private fun commitCell() {
+        val e = cellEdit ?: return
+        val t = tableAt(e.table)
+        if (t == null || e.row >= t.rows.size || e.col >= t.columns) {
+            cellEdit = null
+            return
+        }
+        if (Tables.unescape(t.rows[e.row][e.col]) != cellValue.text) {
+            applyTable(t, Tables.setCell(value.text, t, e.row, e.col, cellValue.text))
+        }
+    }
+
+    private fun closeCell() {
+        commitCell()
+        cellEdit = null
+    }
+
+    /** Tab: on to the next cell, or a new row after the last one, as in Obsidian. */
+    private fun nextCell() {
+        val e = cellEdit ?: return
+        commitCell()
+        var t = tableAt(e.table) ?: return
+        var r = e.row
+        var c = e.col + 1
+        if (c >= t.columns) {
+            c = 0
+            r++
+            if (r >= t.rows.size) {
+                applyTable(t, Tables.addRow(value.text, t, r - 1))
+                t = tableAt(e.table) ?: return
+            }
+        }
+        cellEdit = null
+        openCell(t, r, c)
+    }
+
+    /** A row or column change from the table bar, for the cell being edited. */
+    private fun tableOp(op: String) {
+        val e = cellEdit ?: return
+        commitCell()
+        val t = tableAt(e.table) ?: return
+        val (text, r, c) = when (op) {
+            "row+" -> Triple(Tables.addRow(value.text, t, e.row), if (e.row == 0) 1 else e.row + 1, e.col)
+            "row-" -> Triple(Tables.deleteRow(value.text, t, e.row), (e.row - 1).coerceAtLeast(0), e.col)
+            "col+" -> Triple(Tables.addColumn(value.text, t, e.col), e.row, e.col + 1)
+            "col-" -> Triple(Tables.deleteColumn(value.text, t, e.col), e.row, (e.col - 1).coerceAtLeast(0))
+            else -> Triple(Tables.cycleAlign(value.text, t, e.col), e.row, e.col)
+        }
+        applyTable(t, text)
+        cellEdit = null
+        tableAt(e.table)?.let { openCell(it, r.coerceAtMost(it.rows.size - 1), c.coerceAtMost(it.columns - 1)) }
+    }
+
+    /** Puts [text], with table [t] changed, in the editor, keeping the cursor and folds where they were. */
+    private fun applyTable(t: Tables.Table, text: String) {
+        val old = value
+        if (text == old.text) return
+        val at = lineStart(old.text, t.start) ?: 0
+        val delta = text.length - old.text.length
+        fun shift(i: Int) = if (i > at) (i + delta).coerceIn(at, text.length) else i
+        val next = TextFieldValue(text, TextRange(shift(old.selection.start), shift(old.selection.end)))
+        history.record(old, next, action = true)
+        if (text.count { it == '\n' } != old.text.count { it == '\n' }) folded = Folds.moved(folded, old.text, text)
+        value = next
+    }
+
+    /** A table drawn as a grid: column lefts and widths, row heights, and each cell laid out, in px. */
+    private class Grid(
+        val table: Tables.Table, val xs: IntArray, val ws: IntArray, val hs: IntArray,
+        val cells: List<List<androidx.compose.ui.text.TextLayoutResult>>,
+    ) {
+        val width get() = xs.last() + ws.last()
+        fun rowTop(r: Int) = (0 until r).sumOf { hs[it] }
+    }
+
     private fun cursorFor(text: String, line: Int): Int {
         // No line (the edit button): the top of the note.
         if (line < 0) return 0
@@ -252,9 +362,50 @@ class EditorActivity : ComponentActivity() {
         val cursor = value.selection.start
         val regions = remember(value.text) { Folds.regions(value.text) }
         val collapsed = remember(value.text, folded) { Folds.hiddenLines(value.text, folded, regions) }
-        val preview = remember(active, cursor, collapsed) { LivePreview(p, cfg.textSize, active, cursor, collapsed) }
-        val callouts = remember(value.text, collapsed) { LivePreview.calloutBoxes(value.text, p, collapsed) }
         val density = LocalDensity.current
+        // Tables are drawn as grids, as in Obsidian, except while the cursor is in one.
+        val measurer = rememberTextMeasurer()
+        val cellStyle = TextStyle(color = text, fontSize = cfg.textSize.sp, lineHeight = 1.45.em, fontFamily = font)
+        val styler = remember { LivePreview(p, cfg.textSize, IntRange.EMPTY, -1) }
+        val tables = remember(value.text, collapsed) { Tables.find(value.text, collapsed) }
+        val drawn = tables.filter { t -> active.last < t.start || active.first > t.end }
+        val textWidth = layout?.layoutInput?.constraints?.maxWidth ?: 0
+        val cellPadX = with(density) { 6.dp.roundToPx() }
+        val cellPadY = with(density) { 3.dp.roundToPx() }
+        // The cell being edited is laid out with what's typed so far, so its column and row grow as you type.
+        val editing = cellEdit
+        val typed = if (editing != null) cellValue.text else null
+        val grids = remember(tables, drawn.map { it.start }, textWidth, editing, typed) {
+            if (textWidth <= 0) emptyList() else drawn.map { t ->
+                val styled = t.rows.mapIndexed { r, row ->
+                    row.mapIndexed { c, cell ->
+                        val live = editing?.takeIf { it.table == t.start && it.row == r && it.col == c }?.let { typed }
+                        styler.styleCell(live ?: Tables.unescape(cell), header = r == 0)
+                    }
+                }
+                // Columns as wide as their contents, then the widest narrowed until the table fits.
+                val ws = IntArray(t.columns) { c ->
+                    styled.maxOf { row -> measurer.measure(row[c], cellStyle, softWrap = false, maxLines = 1).size.width } + 2 * cellPadX
+                }
+                val minWidth = 3 * cellPadX + with(density) { cfg.textSize.sp.roundToPx() }
+                while (ws.sum() > textWidth - 1) {
+                    val widest = ws.indices.maxBy { ws[it] }
+                    if (ws[widest] <= minWidth) break
+                    ws[widest] = maxOf(minWidth, ws[widest] - maxOf(1, (ws.sum() - textWidth + 1).coerceAtMost(ws[widest] / 4)))
+                }
+                val xs = IntArray(t.columns).also { for (c in 1 until t.columns) it[c] = it[c - 1] + ws[c - 1] }
+                val cells = styled.map { row ->
+                    row.mapIndexed { c, cell -> measurer.measure(cell, cellStyle, constraints = Constraints(maxWidth = (ws[c] - 2 * cellPadX).coerceAtLeast(1))) }
+                }
+                Grid(t, xs, ws, IntArray(cells.size) { r -> cells[r].maxOf { it.size.height } + 2 * cellPadY }, cells)
+            }
+        }
+        val tableRows = remember(grids) {
+            grids.flatMap { g -> g.hs.indices.map { r -> g.table.line(r) to with(density) { g.hs[r].toSp() } } }.toMap()
+        }
+        val tableRules = remember(grids) { grids.map { it.table.start + 1 }.toSet() }
+        val preview = remember(active, cursor, collapsed, tableRows) { LivePreview(p, cfg.textSize, active, cursor, collapsed, tableRows, tableRules) }
+        val callouts = remember(value.text, collapsed) { LivePreview.calloutBoxes(value.text, p, collapsed) }
         val gutter = with(density) { 22.dp.toPx() }
         val tick = rememberHaptic()
         val padTop = with(density) { 8.dp.toPx() }
@@ -315,6 +466,7 @@ class EditorActivity : ComponentActivity() {
                     HeaderButton(R.drawable.ic_check, "Done", accent, size = 22.dp) { done() }
                 }
                 CompositionLocalProvider(LocalTextSelectionColors provides TextSelectionColors(accent, accent.copy(alpha = 0.35f))) {
+                    Box(Modifier.fillMaxWidth().weight(1f)) {
                     // Scrolled here rather than inside the field, so it can be moved to the tapped line.
                     BasicTextField(
                         value = value,
@@ -330,14 +482,37 @@ class EditorActivity : ComponentActivity() {
                         enabled = loaded,
                         onTextLayout = { layout = it },
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .weight(1f)
+                            .fillMaxSize()
                             .verticalScroll(scroll)
                             // Fold arrows in a gutter at the left, as in Obsidian.
                             .drawBehind {
                                 val l = layout ?: return@drawBehind
                                 val text = value.text
                                 drawCallouts(l, text, preview, callouts, padTop, with(density) { 22.dp.toPx() }, size.width - with(density) { 18.dp.toPx() }, with(density) { cfg.textSize.sp.toPx() }, p)
+                                // Tables as grids: the header shaded, one-pixel lines in the faint colour.
+                                for (g in grids) {
+                                    val y0 = gridTop(l, text, preview, g, padTop) ?: continue
+                                    val x0 = gutter
+                                    val h = g.hs.sum().toFloat()
+                                    drawRect(Color(p.backgroundAlt), Offset(x0, y0), androidx.compose.ui.geometry.Size(g.width.toFloat(), g.hs[0].toFloat()))
+                                    val line = Color(p.faint)
+                                    var y = y0
+                                    for (r in g.hs.indices) {
+                                        drawRect(line, Offset(x0, y), androidx.compose.ui.geometry.Size(g.width.toFloat(), 1f))
+                                        for (c in g.ws.indices) {
+                                            val e = cellEdit
+                                            if (e != null && e.table == g.table.start && e.row == r && e.col == c) continue
+                                            val cell = g.cells[r][c]
+                                            val room = g.ws[c] - 2 * cellPadX - cell.size.width
+                                            val dx = when (Tables.align(g.table, c)) { "right" -> room; "center" -> room / 2; else -> 0 }.coerceAtLeast(0)
+                                            drawText(cell, topLeft = Offset(x0 + g.xs[c] + cellPadX + dx, y + cellPadY))
+                                        }
+                                        y += g.hs[r]
+                                    }
+                                    drawRect(line, Offset(x0, y0 + h), androidx.compose.ui.geometry.Size(g.width.toFloat(), 1f))
+                                    for (x in g.xs) drawRect(line, Offset(x0 + x, y0), androidx.compose.ui.geometry.Size(1f, h + 1))
+                                    drawRect(line, Offset(x0 + g.width - 1, y0), androidx.compose.ui.geometry.Size(1f, h + 1))
+                                }
                                 for ((from, _) in regions) {
                                     if (from in collapsed) continue
                                     val start = lineStart(text, from) ?: continue
@@ -347,13 +522,20 @@ class EditorActivity : ComponentActivity() {
                                 }
                             }
                             // Taps in the gutter fold or unfold, before the text field sees them.
-                            .pointerInput(regions) {
+                            .pointerInput(regions, grids, preview) {
                                 awaitEachGesture {
                                     val down = awaitFirstDown(pass = PointerEventPass.Initial)
-                                    if (down.position.x > gutter) return@awaitEachGesture
+                                    // A tap on a drawn table edits the cell under it, as in Obsidian.
+                                    val hit = layout?.let { l -> cellAt(l, value.text, preview, grids, padTop, gutter, down.position) }
+                                    if (down.position.x > gutter && hit == null) return@awaitEachGesture
                                     down.consume()
                                     val up = waitForUpOrCancellation(PointerEventPass.Initial) ?: return@awaitEachGesture
                                     up.consume()
+                                    if (hit != null) {
+                                        tick()
+                                        openCell(hit.first.table, hit.second, hit.third)
+                                        return@awaitEachGesture
+                                    }
                                     val l = layout ?: return@awaitEachGesture
                                     val offset = preview.toText(l.getOffsetForPosition(Offset(gutter, up.position.y - padTop)))
                                     val line = value.text.substring(0, offset.coerceAtMost(value.text.length)).count { it == '\n' }
@@ -369,8 +551,51 @@ class EditorActivity : ComponentActivity() {
                         cursorBrush = SolidColor(accent),
                         visualTransformation = preview,
                     )
+                    // The cell being edited: a field of its own over the drawn cell.
+                    val e = cellEdit
+                    val g = grids.firstOrNull { it.table.start == e?.table }
+                    val l = layout
+                    if (e != null && g != null && l != null && e.row < g.hs.size && e.col < g.ws.size) {
+                        val y = (gridTop(l, value.text, preview, g, padTop) ?: 0f) + g.rowTop(e.row)
+                        val cellFocus = remember { FocusRequester() }
+                        var focused by remember { mutableStateOf(false) }
+                        BasicTextField(
+                            value = cellValue,
+                            // Wraps like the drawn cell; a line break moves on, since a cell can't hold one.
+                            onValueChange = {
+                                if ('\n' in it.text) {
+                                    cellValue = it.copy(text = it.text.replace("\n", ""))
+                                    nextCell()
+                                } else {
+                                    cellValue = it
+                                }
+                            },
+                            textStyle = cellStyle.copy(fontWeight = if (e.row == 0) FontWeight.Bold else null),
+                            cursorBrush = SolidColor(accent),
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
+                            keyboardActions = KeyboardActions(onNext = { nextCell() }),
+                            modifier = Modifier
+                                .offset { IntOffset((gutter + g.xs[e.col]).toInt(), (y - scroll.value).toInt()) }
+                                .width(with(density) { g.ws[e.col].toDp() })
+                                .heightIn(min = with(density) { g.hs[e.row].toDp() })
+                                .background(bg)
+                                .border(2.dp, accent)
+                                .padding(horizontal = 6.dp, vertical = 3.dp)
+                                .focusRequester(cellFocus)
+                                .onFocusChanged {
+                                    // Tapping elsewhere in the note finishes the cell.
+                                    if (focused && !it.isFocused) closeCell()
+                                    focused = it.isFocused
+                                }
+                                .onPreviewKeyEvent {
+                                    if (it.key == Key.Tab && it.type == KeyEventType.KeyDown) { nextCell(); true } else false
+                                },
+                        )
+                        LaunchedEffect(e) { cellFocus.requestFocus() }
+                    }
+                    }
                 }
-                if (showToolbar && toolbar.isNotEmpty()) ToolbarRow(p)
+                if (cellEdit != null) TableBar(p) else if (showToolbar && toolbar.isNotEmpty()) ToolbarRow(p)
             }
         }
         LaunchedEffect(loaded) { if (loaded) focus.requestFocus() }
@@ -381,6 +606,43 @@ class EditorActivity : ComponentActivity() {
             val top = l.getCursorRect(preview.toShown(value.selection.start).coerceIn(0, l.layoutInput.text.length)).top
             scroll.scrollTo((top - scroll.viewportSize / 4).toInt().coerceAtLeast(0))
             scrollToCursor = false
+        }
+    }
+
+    /** Where grid [g]'s header row starts, in the field's coordinates. */
+    private fun gridTop(l: TextLayoutResult, text: String, preview: LivePreview, g: Grid, top: Float): Float? {
+        val start = lineStart(text, g.table.start) ?: return null
+        return top + l.getLineTop(l.getLineForOffset(preview.toShown(start).coerceAtMost(l.layoutInput.text.length)))
+    }
+
+    /** The drawn table cell at [pos]: its table's grid, row and column. */
+    private fun cellAt(l: TextLayoutResult, text: String, preview: LivePreview, grids: List<Grid>, top: Float, left: Float, pos: Offset): Triple<Grid, Int, Int>? {
+        for (g in grids) {
+            val y0 = gridTop(l, text, preview, g, top) ?: continue
+            if (pos.x < left || pos.x >= left + g.width || pos.y < y0 || pos.y >= y0 + g.hs.sum()) continue
+            val r = g.hs.indices.first { pos.y < y0 + g.rowTop(it + 1) }
+            val c = g.ws.indices.last { pos.x >= left + g.xs[it] }
+            return Triple(g, r, c)
+        }
+        return null
+    }
+
+    /** In place of the toolbar while a cell is edited: rows, columns and alignment, as Obsidian's table menu. */
+    @Composable
+    private fun TableBar(p: Palette) {
+        val tick = rememberHaptic()
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(Color(p.backgroundAlt))
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 6.dp, vertical = 4.dp),
+        ) {
+            for ((op, label) in listOf("row+" to "+ Row", "row-" to "− Row", "col+" to "+ Column", "col-" to "− Column", "align" to "Align")) {
+                TextButton(onClick = { tick(); tableOp(op) }) { Text(label, color = Color(p.muted), fontSize = 14.sp) }
+            }
+            TextButton(onClick = { tick(); closeCell() }) { Text("Done", color = Color(p.accent), fontSize = 14.sp, fontWeight = FontWeight.Bold) }
         }
     }
 
