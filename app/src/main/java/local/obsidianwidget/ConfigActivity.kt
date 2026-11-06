@@ -294,6 +294,7 @@ class ConfigActivity : ComponentActivity() {
                         Preview(cfg, noteText) { previewBounds = it }
 
                         SectionCard("Note", R.drawable.ic_note) {
+                            val primary = MaterialTheme.colorScheme.primary
                             NavRow(
                                 title = notePath?.substringAfterLast('/')?.removeSuffix(".md") ?: "Choose a note",
                                 subtitle = notePath?.substringBeforeLast('/', "")?.ifEmpty { "Vault root" } ?: "Nothing picked yet",
@@ -303,11 +304,22 @@ class ConfigActivity : ComponentActivity() {
                                 switchNotes = it
                                 if (it && altNoteUri.isEmpty()) pickingAlt = true
                             }
-                            if (switchNotes) NavRow(
-                                title = altNotePath.substringAfterLast('/').removeSuffix(".md").ifEmpty { "Choose the second note" },
-                                subtitle = if (altNotePath.isEmpty()) "Nothing picked yet" else "Second note · " + altNotePath.substringBeforeLast('/', "").ifEmpty { "Vault root" },
-                                onClick = { pickingAlt = true },
-                            )
+                            // The note to swap with, set in under the switch so it reads as part of it.
+                            if (switchNotes) Box(
+                                Modifier
+                                    .padding(start = 12.dp)
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                                    .drawBehind { drawRect(primary, size = androidx.compose.ui.geometry.Size(3.dp.toPx(), size.height)) }
+                                    .padding(start = 14.dp, end = 4.dp),
+                            ) {
+                                NavRow(
+                                    title = altNotePath.substringAfterLast('/').removeSuffix(".md").ifEmpty { "Choose a note to swap with" },
+                                    subtitle = if (altNotePath.isEmpty()) "Nothing picked yet" else "Swaps with this note",
+                                    onClick = { pickingAlt = true },
+                                )
+                            }
                             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                             NavRow(
                                 title = vaultName!!,
