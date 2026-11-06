@@ -30,7 +30,17 @@ data class WidgetConfig(
     /** Whether the popup shows the button for source mode, and whether it's in source mode (raw markdown). */
     val showSourceButton: Boolean = true,
     val sourceMode: Boolean = false,
+    /** Switching between two notes: tapping the note's name swaps in [altNoteUri] instead of picking one. */
+    val switchNotes: Boolean = false,
+    val altNoteUri: String = "",
+    val altNotePath: String = "",
 ) {
+    /** Whether tapping the note's name swaps notes. */
+    val swaps: Boolean get() = switchNotes && altNoteUri.isNotEmpty()
+
+    /** The same widget showing its other note. */
+    fun swapped() = copy(noteUri = altNoteUri, notePath = altNotePath, altNoteUri = noteUri, altNotePath = notePath)
+
     val vaultTree: Uri get() = Uri.parse(vault)
 
     /** The vault's font, copied into app storage, or null for the system font. */
@@ -65,6 +75,7 @@ data class WidgetConfig(
         .put("vault", vault).put("vaultName", vaultName).put("checkMinutes", checkMinutes).put("showToolbar", showToolbar)
         .put("readOnly", readOnly).put("showSettings", showSettings)
         .put("showSourceButton", showSourceButton).put("sourceMode", sourceMode)
+        .put("switchNotes", switchNotes).put("altNoteUri", altNoteUri).put("altNotePath", altNotePath)
         .apply {
             colors?.let {
                 put("dark", it.dark.toJson()).put("light", it.light.toJson()).put("vaultMode", it.vaultMode).put("vaultFont", it.font)
@@ -84,6 +95,7 @@ data class WidgetConfig(
             o.optInt("checkMinutes", 30), o.optBoolean("showToolbar", true), o.optBoolean("readOnly", false),
             o.optBoolean("showSettings", true),
             o.optBoolean("showSourceButton", true), o.optBoolean("sourceMode", false),
+            o.optBoolean("switchNotes", false), o.optString("altNoteUri"), o.optString("altNotePath"),
         )
     }
 }

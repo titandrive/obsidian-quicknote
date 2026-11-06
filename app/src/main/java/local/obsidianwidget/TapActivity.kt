@@ -19,6 +19,8 @@ class TapActivity : Activity() {
         const val EXTRA_REFRESH = "refresh"
         /** The line of a fold arrow that was tapped. */
         const val EXTRA_FOLD = "fold"
+        /** Swaps the widget's two notes. */
+        const val EXTRA_SWAP = "swap"
         /** Turns reading mode on or off. */
         const val EXTRA_READ = "read"
     }
@@ -38,6 +40,15 @@ class TapActivity : Activity() {
                     val text = Vault.read(app, cfg.uri) ?: return@thread
                     Folds.toggle(app, id, text, fold)
                     NoteWidgetProvider.update(app, android.appwidget.AppWidgetManager.getInstance(app), id)
+                }
+            }
+            intent.getBooleanExtra(EXTRA_SWAP, false) -> {
+                val app = applicationContext
+                thread {
+                    val cfg = WidgetStore.load(app, id)?.takeIf { it.swaps } ?: return@thread
+                    Folds.swap(app, id, cfg.notePath, cfg.altNotePath)
+                    WidgetStore.save(app, id, cfg.swapped())
+                    NoteWidgetProvider.update(app, AppWidgetManager.getInstance(app), id)
                 }
             }
             intent.getBooleanExtra(EXTRA_READ, false) -> {

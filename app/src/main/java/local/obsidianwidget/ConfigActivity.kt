@@ -134,6 +134,10 @@ class ConfigActivity : ComponentActivity() {
         var colors by remember { mutableStateOf(existing?.colors) }
         var noteText by remember { mutableStateOf<String?>(null) }
         var picking by remember { mutableStateOf(pickOnly) }
+        var switchNotes by remember { mutableStateOf(existing?.switchNotes ?: false) }
+        var altNotePath by remember { mutableStateOf(existing?.altNotePath.orEmpty()) }
+        var altNoteUri by remember { mutableStateOf(existing?.altNoteUri.orEmpty()) }
+        var pickingAlt by remember { mutableStateOf(false) }
         var pickingTheme by remember { mutableStateOf(false) }
         var previewBounds by remember { mutableStateOf<Rect?>(null) }
 
@@ -151,6 +155,8 @@ class ConfigActivity : ComponentActivity() {
                 vaultName = name
                 notePath = null
                 noteUri = null
+                altNotePath = ""
+                altNoteUri = ""
                 swatches.clear()
             }
         }
@@ -189,6 +195,7 @@ class ConfigActivity : ComponentActivity() {
             showToolbar = existing?.showToolbar ?: true,
             readOnly = existing?.readOnly ?: false, showSettings = showSettings,
             showSourceButton = showSourceButton, sourceMode = (existing?.sourceMode ?: false) && showSourceButton,
+            switchNotes = switchNotes, altNoteUri = altNoteUri, altNotePath = altNotePath,
         )
         val cfg = current()
 
@@ -201,6 +208,15 @@ class ConfigActivity : ComponentActivity() {
                     noteUri = note.uri.toString()
                     picking = false
                     if (pickOnly) scope.launch { save(current()) }
+                }
+                return@AppTheme
+            }
+            if (pickingAlt) {
+                BackHandler { pickingAlt = false }
+                NotePicker(notes, altNoteUri, onBack = { pickingAlt = false }) { note ->
+                    altNotePath = note.path
+                    altNoteUri = note.uri.toString()
+                    pickingAlt = false
                 }
                 return@AppTheme
             }
@@ -282,6 +298,15 @@ class ConfigActivity : ComponentActivity() {
                                 title = notePath?.substringAfterLast('/')?.removeSuffix(".md") ?: "Choose a note",
                                 subtitle = notePath?.substringBeforeLast('/', "")?.ifEmpty { "Vault root" } ?: "Nothing picked yet",
                                 onClick = { picking = true },
+                            )
+                            SwitchRow("Switch between two notes", "Tapping the note's name on the widget swaps them", switchNotes) {
+                                switchNotes = it
+                                if (it && altNoteUri.isEmpty()) pickingAlt = true
+                            }
+                            if (switchNotes) NavRow(
+                                title = altNotePath.substringAfterLast('/').removeSuffix(".md").ifEmpty { "Choose the second note" },
+                                subtitle = if (altNotePath.isEmpty()) "Nothing picked yet" else "Second note · " + altNotePath.substringBeforeLast('/', "").ifEmpty { "Vault root" },
+                                onClick = { pickingAlt = true },
                             )
                             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                             NavRow(

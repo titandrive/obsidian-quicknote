@@ -221,6 +221,21 @@ object Folds {
     fun hiddenLines(text: String, folded: Set<Int>, regions: Map<Int, Region> = regions(text)): Set<Int> =
         folded.flatMap { from -> regions[from]?.let { (it.from + 1)..it.to } ?: IntRange.EMPTY }.toSet()
 
+    /**
+     * Widget [id] switched from note [from] to note [to] (both paths): its folds for [from] are put
+     * aside, and any it had for [to] come back.
+     */
+    fun swap(ctx: Context, id: Int, from: String, to: String) {
+        val p = prefs(ctx)
+        val current = p.getString("w$id", null)
+        val next = p.getString("w$id@$to", null)
+        p.edit().apply {
+            if (current != null) putString("w$id@$from", current) else remove("w$id@$from")
+            if (next != null) putString("w$id", next) else remove("w$id")
+            remove("w$id@$to")
+        }.apply()
+    }
+
     /** Forgets widget [id]'s folds, e.g. when it's removed or shows another note. */
     fun forget(ctx: Context, id: Int) {
         prefs(ctx).edit().remove("w$id").apply()
