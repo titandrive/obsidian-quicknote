@@ -299,7 +299,7 @@ class ConfigActivity : ComponentActivity() {
                                 subtitle = notePath?.substringBeforeLast('/', "")?.ifEmpty { "Vault root" } ?: "Nothing picked yet",
                                 onClick = { picking = true },
                             )
-                            SwitchRow("Swap notes", "Tap the widget's title to flip between two notes", switchNotes) {
+                            SwitchRow("Swap notes", "Tap the note's title to quickly swap between two notes", switchNotes) {
                                 switchNotes = it
                                 if (it && altNoteUri.isEmpty()) pickingAlt = true
                             }
