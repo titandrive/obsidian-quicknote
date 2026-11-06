@@ -97,7 +97,8 @@ class ConfigActivity : ComponentActivity() {
         val pickOnly = intent.getBooleanExtra(EXTRA_PICK_ONLY, false) && existing != null
         val pickAlt = pickOnly && intent.getBooleanExtra(EXTRA_PICK_ALT, false)
         enableEdgeToEdge()
-        setContent { Screen(existing, pickOnly && !pickAlt, pickAlt) }
+        // A new widget starts with the settings of the one removed last, so replacing a widget is quick.
+        setContent { Screen(existing ?: WidgetStore.lastRemoved(this), pickOnly && !pickAlt, pickAlt) }
     }
 
     private suspend fun save(cfg: WidgetConfig) {

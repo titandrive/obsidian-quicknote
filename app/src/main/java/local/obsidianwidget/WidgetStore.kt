@@ -116,7 +116,16 @@ object WidgetStore {
         prefs(ctx).edit().putString("w$id", cfg.toJson().toString()).apply()
     }
 
+    /** Forgets widget [id]'s settings, keeping them as [lastRemoved] for the next widget added. */
     fun delete(ctx: Context, id: Int) {
-        prefs(ctx).edit().remove("w$id").apply()
+        val p = prefs(ctx)
+        p.edit().apply {
+            p.getString("w$id", null)?.let { putString("removed", it) }
+            remove("w$id")
+        }.apply()
     }
+
+    /** The settings of the widget removed last, so one put back in its place starts as it was. */
+    fun lastRemoved(ctx: Context): WidgetConfig? =
+        prefs(ctx).getString("removed", null)?.let { runCatching { WidgetConfig.fromJson(JSONObject(it)) }.getOrNull() }
 }
