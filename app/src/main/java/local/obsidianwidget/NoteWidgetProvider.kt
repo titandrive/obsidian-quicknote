@@ -150,7 +150,18 @@ class NoteWidgetProvider : AppWidgetProvider() {
         }
 
         /** Redraws the widget, note and all. Reads and renders the note, so call it off the main thread. */
+        /**
+         * One redraw at a time per widget, so they reach the launcher in order. Two overlapping ones
+         * (a swap drawn from scratch, then a quick swap back from the cache) could land in the wrong
+         * order, leaving the widget showing the note it had just left.
+         */
+        private val drawing = HashMap<Int, Any>()
+
         fun update(ctx: Context, mgr: AppWidgetManager, id: Int) {
+            synchronized(synchronized(drawing) { drawing.getOrPut(id) { Any() } }) { draw(ctx, mgr, id) }
+        }
+
+        private fun draw(ctx: Context, mgr: AppWidgetManager, id: Int) {
             val cfg = WidgetStore.load(ctx, id)
             val views = RemoteViews(ctx.packageName, R.layout.widget_note)
             val looks = looks(ctx, cfg)
