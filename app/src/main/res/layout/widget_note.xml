@@ -39,9 +39,9 @@
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:visibility="gone"
-                android:minHeight="44dp"
+                android:minHeight="34dp"
                 android:scaleType="fitStart"
-                android:paddingVertical="11dp" />
+                android:paddingVertical="6dp" />
 
             <!--
                 What shows until the app draws the real title: in the widget picker's preview, and if
@@ -54,7 +54,7 @@
                 android:layout_weight="1"
                 android:ellipsize="end"
                 android:singleLine="true"
-                android:paddingVertical="13dp"
+                android:paddingVertical="8dp"
                 android:text="@string/widget_title_placeholder"
                 android:textColor="#FFDADADA"
                 android:textSize="15sp"
@@ -63,18 +63,16 @@
             <ImageView
                 android:id="@+id/btn_read"
                 android:layout_width="34dp"
-                android:layout_height="44dp"
-                android:paddingHorizontal="8dp"
-                android:paddingVertical="13dp"
+                android:layout_height="34dp"
+                android:padding="8dp"
                 android:src="@drawable/ic_read"
                 android:contentDescription="@string/reading_mode" />
 
             <ImageView
                 android:id="@+id/btn_refresh"
                 android:layout_width="34dp"
-                android:layout_height="44dp"
-                android:paddingHorizontal="8dp"
-                android:paddingVertical="13dp"
+                android:layout_height="34dp"
+                android:padding="8dp"
                 android:src="@drawable/ic_refresh"
                 android:contentDescription="@string/refresh" />
 
@@ -82,9 +80,8 @@
             <ProgressBar
                 android:id="@+id/refresh_spin"
                 android:layout_width="34dp"
-                android:layout_height="44dp"
-                android:paddingHorizontal="8dp"
-                android:paddingVertical="13dp"
+                android:layout_height="34dp"
+                android:padding="8dp"
                 android:indeterminate="true"
                 android:indeterminateDrawable="@drawable/refresh_spin"
                 android:indeterminateDuration="900"
@@ -93,27 +90,24 @@
             <ImageView
                 android:id="@+id/btn_open"
                 android:layout_width="34dp"
-                android:layout_height="44dp"
-                android:paddingHorizontal="8dp"
-                android:paddingVertical="13dp"
+                android:layout_height="34dp"
+                android:padding="8dp"
                 android:src="@drawable/ic_open"
                 android:contentDescription="@string/open_in_obsidian" />
 
             <ImageView
                 android:id="@+id/btn_settings"
                 android:layout_width="34dp"
-                android:layout_height="44dp"
-                android:paddingHorizontal="8dp"
-                android:paddingVertical="13dp"
+                android:layout_height="34dp"
+                android:padding="8dp"
                 android:src="@drawable/ic_settings"
                 android:contentDescription="@string/settings" />
 
             <ImageView
                 android:id="@+id/btn_edit"
                 android:layout_width="34dp"
-                android:layout_height="44dp"
-                android:paddingHorizontal="8dp"
-                android:paddingVertical="13dp"
+                android:layout_height="34dp"
+                android:padding="8dp"
                 android:src="@drawable/ic_edit"
                 android:contentDescription="@string/edit" />
         </LinearLayout>

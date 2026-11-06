@@ -256,9 +256,14 @@ object NoteRows {
                     foldOverlap = overlap
                 }
             }
-            // Taps go to the block under the strip's middle.
+            // Taps go to the block under the strip's middle; but a task reaching a third of the way
+            // into the strip takes it, since strips don't line up with lines, and a tap on a task's
+            // top or bottom edge went to the line beside it.
             val mid = top + strip / 2
-            val under = pieces.firstOrNull { mid < it.top + it.height } ?: pieces.last()
+            val middle = pieces.firstOrNull { mid < it.top + it.height } ?: pieces.last()
+            val under = if (middle.block.task) middle else pieces.filter { it.block.task }
+                .maxByOrNull { minOf(it.top + it.height, top + strip) - maxOf(it.top, top) }
+                ?.takeIf { minOf(it.top + it.height, top + strip) - maxOf(it.top, top) >= strip / 3 } ?: middle
             // A task's checkbox ("☐ ", its first character) sits on its first row of text.
             val boxX = under.layout?.takeIf { under.block.task }?.let { l ->
                 val (rowTop, rowBottom) = firstRow(under)
