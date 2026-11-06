@@ -20,6 +20,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -34,15 +35,24 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-/** Launcher screen: pick the vault once, then add widgets from here or the home screen. */
+/**
+ * What the app's icon opens: the widgets on the home screen, each to its settings, a button to add
+ * another, and the vault new widgets start with.
+ */
 class MainActivity : ComponentActivity() {
+    /** The widgets placed and set up, by id; read again whenever the screen comes back. */
+    private var widgets by mutableStateOf<List<Pair<Int, WidgetConfig>>>(emptyList())
+
+    override fun onResume() {
+        super.onResume()
+        widgets = NoteWidgetProvider.allIds(this).toList().mapNotNull { id -> WidgetStore.load(this, id)?.let { id to it } }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            // The vault new widgets start with; each widget can pick its own in its settings.
             var vault by remember { mutableStateOf(Vault.defaultTree(this)) }
-            var vaultName by remember { mutableStateOf(if (vault == null) null else Vault.defaultName(this)) }
             // Dressed in the vault's own theme once it's read, like the widget settings.
             var colors by remember { mutableStateOf<ThemeColors?>(null) }
             LaunchedEffect(vault) {
@@ -51,10 +61,8 @@ class MainActivity : ComponentActivity() {
             }
             val pickVault = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
                 if (uri != null) {
-                    val name = Vault.take(this, uri)
-                    Vault.setDefault(this, uri, name)
+                    Vault.setDefault(this, uri, Vault.take(this, uri))
                     vault = uri
-                    vaultName = name
                 }
             }
             val look = colors?.let { WidgetConfig("", "", colors = it) }
@@ -72,42 +80,40 @@ class MainActivity : ComponentActivity() {
                             Text(getString(R.string.app_name), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
                         }
 
-                        SectionCard("Vault", R.drawable.ic_folder) {
-                            if (vaultName == null) {
+                        SectionCard("Widgets", R.drawable.ic_widget) {
+                            if (widgets.isEmpty()) {
                                 Text(
-                                    "Pick your vault's folder. With Obsidian Sync it's usually in Documents.",
+                                    "None on the home screen yet.",
                                     style = MaterialTheme.typography.bodyMedium, color = noteColor(),
                                 )
-                                Button(onClick = { pickVault.launch(null) }, shape = CircleShape, modifier = Modifier.fillMaxWidth().height(48.dp)) {
-                                    Text("Choose vault folder")
-                                }
-                            } else {
-                                NavRow(vaultName!!, "Default for new widgets. Each widget can use its own", onClick = { pickVault.launch(null) })
+                            }
+                            widgets.forEachIndexed { i, (id, cfg) ->
+                                if (i > 0) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                                NavRow(
+                                    title = cfg.title.ifEmpty { "No note chosen" },
+                                    subtitle = if (cfg.swaps) "Swaps with " + cfg.altNotePath.substringAfterLast('/').removeSuffix(".md")
+                                    else Vault.displayPath(cfg.vaultTree),
+                                    leading = { IconTile(R.drawable.ic_note, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
+                                    onClick = { startActivity(NoteWidgetProvider.configIntent(this@MainActivity, id, pickOnly = false)) },
+                                )
                             }
                         }
 
                         val mgr = AppWidgetManager.getInstance(this@MainActivity)
-                        if (vaultName != null && mgr.isRequestPinAppWidgetSupported) {
+                        if (mgr.isRequestPinAppWidgetSupported) {
                             Button(
                                 onClick = { mgr.requestPinAppWidget(ComponentName(this@MainActivity, NoteWidgetProvider::class.java), null, null) },
                                 shape = CircleShape,
                                 modifier = Modifier.fillMaxWidth().height(52.dp),
-                            ) { Text("Add a widget to the home screen", fontWeight = FontWeight.SemiBold) }
+                            ) { Text("Add a widget", fontWeight = FontWeight.SemiBold) }
                         }
 
-                        SectionCard("Using the widget", R.drawable.ic_widget) {
-                            for ((what, does) in listOf(
-                                "Tap a line" to "Edit the note there; it saves when you tap ✓ or outside",
-                                "Tap a task" to "Tick it off",
-                                "Tap the note's name" to "Switch to another note",
-                                "Refresh" to "Re-read the note, theme and font",
-                                "Cog" to "Theme, light/dark, opacity and text size",
-                            )) {
-                                Column(Modifier.padding(vertical = 2.dp)) {
-                                    Text(what, style = MaterialTheme.typography.bodyLarge)
-                                    Text(does, style = MaterialTheme.typography.bodySmall, color = noteColor())
-                                }
-                            }
+                        SectionCard("Default vault", R.drawable.ic_folder) {
+                            NavRow(
+                                title = vault?.let(Vault::displayPath) ?: "Choose your vault folder",
+                                subtitle = "New widgets start with this vault",
+                                onClick = { pickVault.launch(null) },
+                            )
                         }
                     }
                 }
