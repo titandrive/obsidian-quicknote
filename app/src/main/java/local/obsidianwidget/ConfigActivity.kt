@@ -300,8 +300,8 @@ class ConfigActivity : ComponentActivity() {
                             val primary = MaterialTheme.colorScheme.primary
                             // The vault first, since it's picked first.
                             NavRow(
-                                title = vaultName!!,
-                                subtitle = vault?.let { Vault.displayPath(Uri.parse(it)) } ?: "Vault folder",
+                                title = vault?.let { Vault.displayPath(Uri.parse(it)) } ?: vaultName!!,
+                                subtitle = "Vault folder",
                                 leading = { IconTile(R.drawable.ic_folder, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
                                 onClick = { pickVault.launch(null) },
                             )
