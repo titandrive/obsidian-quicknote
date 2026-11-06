@@ -128,7 +128,7 @@ class ConfigActivity : ComponentActivity() {
         var opacity by remember { mutableIntStateOf(existing?.opacity ?: 100) }
         var textSize by remember { mutableStateOf(existing?.textSize ?: 14f) }
         var showHeader by remember { mutableStateOf(existing?.showHeader ?: true) }
-        var readOnlyPopup by remember { mutableStateOf(existing?.readOnlyPopup ?: false) }
+        var showSettings by remember { mutableStateOf(existing?.showSettings ?: true) }
         var checkMinutes by remember { mutableIntStateOf(existing?.checkMinutes ?: 30) }
         var colors by remember { mutableStateOf(existing?.colors) }
         var noteText by remember { mutableStateOf<String?>(null) }
@@ -186,7 +186,7 @@ class ConfigActivity : ComponentActivity() {
             opacity = opacity, textSize = textSize, colors = colors, showHeader = showHeader,
             vault = vault.orEmpty(), vaultName = vaultName.orEmpty(), checkMinutes = checkMinutes,
             showToolbar = existing?.showToolbar ?: true,
-            readOnly = existing?.readOnly ?: false, readOnlyPopup = readOnlyPopup,
+            readOnly = existing?.readOnly ?: false, showSettings = showSettings,
         )
         val cfg = current()
 
@@ -305,10 +305,10 @@ class ConfigActivity : ComponentActivity() {
                             StepSlider(textSize.toInt(), 10..19, step = 1) { textSize = it.toFloat() }
                             SwitchRow("Show header", null, showHeader) { showHeader = it }
                             SwitchRow(
-                                "Reading mode in the popup too",
-                                if (readOnlyPopup) "The book button makes the widget and its popup read-only" else "The book button makes only the widget read-only",
-                                readOnlyPopup,
-                            ) { readOnlyPopup = it }
+                                "Show settings button",
+                                if (showSettings) null else "Long-press the widget to get back here",
+                                showSettings,
+                            ) { showSettings = it }
                         }
 
                         SectionCard("Updates", R.drawable.ic_refresh) {
@@ -390,7 +390,7 @@ class ConfigActivity : ComponentActivity() {
                         cfg.title.ifEmpty { "Note" }, color = Color(p.title), fontWeight = FontWeight.Bold, fontSize = 15.sp,
                         fontFamily = Fonts.compose(cfg.fontFile), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
                     )
-                    for (icon in listOf(R.drawable.ic_refresh, R.drawable.ic_open, R.drawable.ic_settings, R.drawable.ic_edit)) {
+                    for (icon in listOfNotNull(R.drawable.ic_read, R.drawable.ic_refresh, R.drawable.ic_open, R.drawable.ic_settings.takeIf { cfg.showSettings }, R.drawable.ic_edit)) {
                         Icon(painterResource(icon), null, tint = Color(p.muted), modifier = Modifier.padding(8.dp).size(18.dp))
                     }
                 }

@@ -67,7 +67,6 @@ import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextRange
@@ -119,8 +118,6 @@ class EditorActivity : ComponentActivity() {
     private var savedFolds: Set<Int> = emptySet()
     /** Whether the formatting toolbar shows; remembered per widget. */
     private var showToolbar by mutableStateOf(true)
-    /** Reading mode: everything rendered, no keyboard, folding only; shared with the widget if it is set to cover the popup. */
-    private var readOnly by mutableStateOf(false)
     /** The vault's mobile toolbar buttons, once read. */
     private var toolbar by mutableStateOf<List<Toolbar.Command>>(emptyList())
 
@@ -130,8 +127,6 @@ class EditorActivity : ComponentActivity() {
         widgetId = id
         cfg = WidgetStore.load(this, id) ?: return finish()
         showToolbar = cfg.showToolbar
-        // Reading mode on the widget carries over to the popup only if the widget's set up that way.
-        readOnly = cfg.readOnly && cfg.readOnlyPopup
 
         enableEdgeToEdge()
         val line = intent.getIntExtra(EXTRA_LINE, -1)
@@ -239,14 +234,12 @@ class EditorActivity : ComponentActivity() {
         val muted = Color(p.muted)
         val font = remember { Fonts.compose(cfg.fontFile) }
         val focus = remember { FocusRequester() }
-        val focusManager = LocalFocusManager.current
         val noRipple = remember { MutableInteractionSource() }
         val scroll = rememberScrollState()
         var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
         // Restyled whenever the cursor moves to another line, so that line's markup shows.
-        // In reading mode no line is being edited, so all of the note is rendered.
-        val active = if (readOnly) IntRange.EMPTY else LivePreview.activeLines(value.text, value.selection.start, value.selection.end)
-        val cursor = if (readOnly) -1 else value.selection.start
+        val active = LivePreview.activeLines(value.text, value.selection.start, value.selection.end)
+        val cursor = value.selection.start
         val regions = remember(value.text) { Folds.regions(value.text) }
         val collapsed = remember(value.text, folded) { Folds.hiddenLines(value.text, folded, regions) }
         val preview = remember(active, cursor, collapsed) { LivePreview(p, cfg.textSize, active, cursor, collapsed) }
@@ -290,20 +283,11 @@ class EditorActivity : ComponentActivity() {
                                 leaveFor(NoteWidgetProvider.configIntent(this@EditorActivity, widgetId, pickOnly = true))
                             },
                     )
-                    if (!readOnly) HeaderButton(R.drawable.ic_toolbar, if (showToolbar) "Hide toolbar" else "Show toolbar", if (showToolbar) accent else muted) {
+                    HeaderButton(R.drawable.ic_toolbar, if (showToolbar) "Hide toolbar" else "Show toolbar", if (showToolbar) accent else muted) {
                         showToolbar = !showToolbar
                         // Saved onto the widget's latest settings, which may have changed since opening.
                         WidgetStore.load(this@EditorActivity, widgetId)?.let {
                             WidgetStore.save(this@EditorActivity, widgetId, it.copy(showToolbar = showToolbar))
-                        }
-                    }
-                    HeaderButton(R.drawable.ic_read, if (readOnly) "Edit" else "Reading mode", if (readOnly) accent else muted) {
-                        readOnly = !readOnly
-                        if (readOnly) focusManager.clearFocus() else focus.requestFocus()
-                        // Shared with the widget when reading mode covers both; otherwise just this popup.
-                        WidgetStore.load(this@EditorActivity, widgetId)?.takeIf { it.readOnlyPopup }?.let {
-                            WidgetStore.save(this@EditorActivity, widgetId, it.copy(readOnly = readOnly))
-                            NoteWidgetProvider.refreshNote(this@EditorActivity, cfg.noteUri)
                         }
                     }
                     val spin by rememberInfiniteTransition(label = "refresh").animateFloat(
@@ -315,7 +299,7 @@ class EditorActivity : ComponentActivity() {
                     HeaderButton(R.drawable.ic_open, "Open in Obsidian", muted) {
                         leaveFor(Intent(Intent.ACTION_VIEW, Vault.openUri(cfg.vaultName, cfg.notePath)))
                     }
-                    HeaderButton(R.drawable.ic_settings, "Widget settings", muted) {
+                    if (cfg.showSettings) HeaderButton(R.drawable.ic_settings, "Widget settings", muted) {
                         leaveFor(NoteWidgetProvider.configIntent(this@EditorActivity, widgetId, pickOnly = false))
                     }
                     HeaderButton(R.drawable.ic_check, "Done", accent, size = 22.dp) { done() }
@@ -334,7 +318,6 @@ class EditorActivity : ComponentActivity() {
                             value = next
                         },
                         enabled = loaded,
-                        readOnly = readOnly,
                         onTextLayout = { layout = it },
                         modifier = Modifier
                             .fillMaxWidth()
@@ -373,14 +356,14 @@ class EditorActivity : ComponentActivity() {
                             .padding(start = 22.dp, end = 18.dp, top = 8.dp, bottom = 8.dp)
                             .focusRequester(focus),
                         textStyle = TextStyle(color = text, fontSize = cfg.textSize.sp, lineHeight = 1.45.em, fontFamily = font),
-                        cursorBrush = SolidColor(if (readOnly) Color.Transparent else accent),
+                        cursorBrush = SolidColor(accent),
                         visualTransformation = preview,
                     )
                 }
-                if (showToolbar && !readOnly && toolbar.isNotEmpty()) ToolbarRow(p)
+                if (showToolbar && toolbar.isNotEmpty()) ToolbarRow(p)
             }
         }
-        LaunchedEffect(loaded) { if (loaded && !readOnly) focus.requestFocus() }
+        LaunchedEffect(loaded) { if (loaded) focus.requestFocus() }
         LaunchedEffect(scrollToCursor, layout) {
             val l = layout ?: return@LaunchedEffect
             if (!scrollToCursor || !loaded) return@LaunchedEffect
