@@ -325,19 +325,11 @@ class ConfigActivity : ComponentActivity() {
                                     .drawBehind { drawRect(primary, size = androidx.compose.ui.geometry.Size(3.dp.toPx(), size.height)) }
                                     .padding(start = 14.dp, end = 4.dp),
                             ) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Box(Modifier.weight(1f)) {
-                                        NavRow(
-                                            title = altNotePath.substringAfterLast('/').removeSuffix(".md").ifEmpty { "Choose a note to swap with" },
-                                            subtitle = "Secondary note",
-                                            onClick = { pickingAlt = true },
-                                        )
-                                    }
-                                    // Clears the second note, so the title picks one again.
-                                    if (altNoteUri.isNotEmpty()) androidx.compose.material3.IconButton(onClick = { altNoteUri = ""; altNotePath = "" }) {
-                                        Icon(painterResource(R.drawable.ic_close), "Clear the secondary note", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
-                                    }
-                                }
+                                NavRow(
+                                    title = altNotePath.substringAfterLast('/').removeSuffix(".md").ifEmpty { "Choose a note to swap with" },
+                                    subtitle = "Secondary note",
+                                    onClick = { pickingAlt = true },
+                                )
                             }
                         }
 
