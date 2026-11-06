@@ -88,8 +88,8 @@ object NoteRows {
         val folded = if (unfolded) emptySet() else text?.let { Folds.folded(ctx, id, it) }.orEmpty()
         fun rows(dark: Boolean): List<Row> {
             val key = cacheKey(ctx, cfg, text, width, dark) + "|" + folded.sorted()
-            return cached(ctx, id, dark, key)
-                ?: render(ctx, cfg, cfg.palette(ctx, dark), text, width, regions, folded).also { save(ctx, id, dark, key, it) }
+            return cached(ctx, id, dark, key, cfg.noteUri)
+                ?: render(ctx, cfg, cfg.palette(ctx, dark), text, width, regions, folded).also { save(ctx, id, dark, key, cfg.noteUri, it) }
         }
         if (!dayAndNight(cfg)) return Built(rows(cfg.isDark(ctx)), null)
         val day = rows(false)
@@ -397,12 +397,17 @@ object NoteRows {
         return digest.joinToString("") { "%02x".format(it) }
     }
 
-    private fun cacheFile(ctx: Context, id: Int, dark: Boolean) = File(ctx.cacheDir, "rows-$id-${if (dark) "dark" else "light"}.bin")
+    /**
+     * A widget's rows for one note, so switching between notes after the app was closed finds both
+     * still drawn rather than drawing the other one afresh.
+     */
+    private fun cacheFile(ctx: Context, id: Int, dark: Boolean, note: String) =
+        File(ctx.cacheDir, "rows-$id-${if (dark) "dark" else "light"}-${note.hashCode().toUInt()}.bin")
 
-    private fun cached(ctx: Context, id: Int, dark: Boolean, key: String): List<Row>? = synchronized(memory) {
+    private fun cached(ctx: Context, id: Int, dark: Boolean, key: String, note: String): List<Row>? = synchronized(memory) {
         memory["$id/$dark/$key"]
             ?: runCatching {
-                DataInputStream(cacheFile(ctx, id, dark).inputStream().buffered()).use { input ->
+                DataInputStream(cacheFile(ctx, id, dark, note).inputStream().buffered()).use { input ->
                     if (input.readUTF() != key) return@use null
                     List(input.readInt()) {
                         val line = input.readInt()
@@ -418,10 +423,10 @@ object NoteRows {
             }.getOrNull()?.also { memory["$id/$dark/$key"] = it }
     }
 
-    private fun save(ctx: Context, id: Int, dark: Boolean, key: String, rows: List<Row>) = synchronized(memory) {
+    private fun save(ctx: Context, id: Int, dark: Boolean, key: String, note: String, rows: List<Row>) = synchronized(memory) {
         memory["$id/$dark/$key"] = rows
         runCatching {
-            val file = cacheFile(ctx, id, dark)
+            val file = cacheFile(ctx, id, dark, note)
             val tmp = File(file.path + ".tmp")
             DataOutputStream(tmp.outputStream().buffered()).use { out ->
                 out.writeUTF(key)
@@ -442,13 +447,16 @@ object NoteRows {
                 }
             }
             tmp.renameTo(file)
+            // Kept for the last few notes shown (two notes, light and dark), not every note ever picked.
+            ctx.cacheDir.listFiles { f -> f.name.startsWith("rows-$id-") }
+                ?.sortedByDescending { it.lastModified() }?.drop(4)?.forEach { it.delete() }
         }
     }
 
     fun forget(ctx: Context, id: Int) = synchronized(memory) {
         for (dark in listOf(false, true)) {
             memory.keys.removeAll { it.startsWith("$id/$dark/") }
-            cacheFile(ctx, id, dark).delete()
+            ctx.cacheDir.listFiles { f -> f.name.startsWith("rows-$id-") }?.forEach { it.delete() }
         }
     }
 
