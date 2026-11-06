@@ -32,6 +32,8 @@ object NoteRows {
         val image: ByteArray, val line: Int, val task: Boolean, val text: CharSequence?,
         /** The foldable line whose arrow is in this strip, or -1; and whether it's folded. */
         val fold: Int = -1, val folded: Boolean = false,
+        /** For a task, its line as written, so a tick can find it if the note changed since. */
+        val source: String? = null,
     )
 
     /** One block laid out on the note's tall imaginary canvas, [top] to [top] + [height]. */
@@ -107,6 +109,7 @@ object NoteRows {
         val gutter = if (regions.isEmpty()) 0 else dp(ctx, 18)
         val width = fullWidth - gutter
         val indent = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, cfg.textSize * 1.2f, ctx.resources.displayMetrics).toInt()
+        val sourceLines = text?.split('\n')
         val blocks = if (text == null) {
             listOf(Block("Couldn't read ${cfg.notePath}. It may have been moved or renamed; tap the note's name to pick it again.", 0))
         } else {
@@ -257,6 +260,7 @@ object NoteRows {
             Row(
                 compress(bmp), under.block.line, under.block.task, spoken(pieces, top, top + strip),
                 fold?.block?.line ?: -1, fold?.block?.fold == Block.FOLDED,
+                if (under.block.task) sourceLines?.getOrNull(under.block.line)?.removeSuffix("\r") else null,
             )
         }
         return rows
@@ -397,7 +401,8 @@ object NoteRows {
                         val text = if (input.readBoolean()) input.readUTF() else null
                         val image = ByteArray(input.readInt()).also(input::readFully)
                         val fold = input.readInt()
-                        Row(image, line, task, text, fold, input.readBoolean())
+                        val folded = input.readBoolean()
+                        Row(image, line, task, text, fold, folded, if (input.readBoolean()) input.readUTF() else null)
                     }
                 }
             }.getOrNull()?.also { memory["$id/$dark/$key"] = it }
@@ -421,6 +426,8 @@ object NoteRows {
                     out.write(r.image)
                     out.writeInt(r.fold)
                     out.writeBoolean(r.folded)
+                    out.writeBoolean(r.source != null)
+                    r.source?.let { out.writeUTF(it.take(8000)) }
                 }
             }
             tmp.renameTo(file)
@@ -445,7 +452,8 @@ object NoteRows {
         row.text?.let { setContentDescription(R.id.item_img, it) }
         setOnClickFillInIntent(
             R.id.item,
-            Intent().putExtra(EditorActivity.EXTRA_LINE, row.line).putExtra(EditorActivity.EXTRA_TOGGLE, row.task),
+            Intent().putExtra(EditorActivity.EXTRA_LINE, row.line).putExtra(EditorActivity.EXTRA_TOGGLE, row.task)
+                .putExtra(EditorActivity.EXTRA_SOURCE, row.source),
         )
         // The gutter over a fold arrow folds or unfolds, rather than opening the editor.
         if (row.fold >= 0) {

@@ -320,7 +320,26 @@ object Markdown {
         row.trim().removePrefix("|").removeSuffix("|").split(Regex("(?<!\\\\)\\|"))
 
     /** Flips the checkbox on [line] of [src]; returns null if that line isn't a task any more. */
-    fun toggleTask(src: String, line: Int): String? {
+    /**
+     * Ticks or unticks the task on [line] of [src]. With [expected] (the task's line as the widget
+     * drew it), a line that no longer matches, because lines were added or removed since, is
+     * looked for nearby, ticked or not.
+     */
+    fun toggleTask(src: String, line: Int, expected: String? = null): String? {
+        if (expected != null) {
+            val lines = src.split('\n')
+            fun same(l: String) = TASK_BOX.find(l) != null && unticked(l.removeSuffix("\r")) == unticked(expected)
+            val at = if (lines.getOrNull(line)?.let(::same) == true) line
+            else lines.indices.filter { same(lines[it]) }.minByOrNull { kotlin.math.abs(it - line) } ?: return null
+            return toggleLine(src, at)
+        }
+        return toggleLine(src, line)
+    }
+
+    /** [line] with its checkbox cleared, to compare tasks whether ticked or not. */
+    private fun unticked(line: String) = TASK_BOX.find(line)?.let { line.replaceRange(it.groups[2]!!.range, " ") } ?: line
+
+    private fun toggleLine(src: String, line: Int): String? {
         val lines = src.split('\n').toMutableList()
         val target = lines.getOrNull(line) ?: return null
         val m = TASK_BOX.find(target) ?: return null

@@ -60,7 +60,8 @@ class TapActivity : Activity() {
                 val cfg = WidgetStore.load(this, id)
                 if (cfg != null && intent.getBooleanExtra(EditorActivity.EXTRA_TOGGLE, false)) {
                     val app = applicationContext
-                    thread { EditorActivity.toggleTask(app, cfg, line) }
+                    val source = intent.getStringExtra(EditorActivity.EXTRA_SOURCE)
+                    thread { EditorActivity.toggleTask(app, cfg, line, source) }
                 } else if (cfg != null && !cfg.readOnly) {
                     startActivity(NoteWidgetProvider.editorIntent(this, id).putExtra(EditorActivity.EXTRA_LINE, line))
                 }

@@ -89,13 +89,23 @@ class EditorActivity : ComponentActivity() {
     companion object {
         const val EXTRA_LINE = "line"
         const val EXTRA_TOGGLE = "toggle"
+        /** A tapped task's line as the widget drew it. */
+        const val EXTRA_SOURCE = "source"
 
-        fun toggleTask(ctx: Context, cfg: WidgetConfig, line: Int) {
-            val text = Vault.read(ctx, cfg.uri) ?: return
-            val next = Markdown.toggleTask(text, line) ?: return
-            Vault.write(ctx, cfg.uri, next)
+        /**
+         * Ticks a task on the widget. One at a time: two quick taps each reading the note and
+         * writing it back could lose the first tick.
+         */
+        fun toggleTask(ctx: Context, cfg: WidgetConfig, line: Int, expected: String? = null) {
+            synchronized(TICKS) {
+                val text = Vault.read(ctx, cfg.uri) ?: return
+                val next = Markdown.toggleTask(text, line, expected) ?: return
+                Vault.write(ctx, cfg.uri, next)
+            }
             NoteWidgetProvider.refreshNote(ctx, cfg.noteUri)
         }
+
+        private val TICKS = Any()
     }
 
     private lateinit var cfg: WidgetConfig
@@ -157,7 +167,7 @@ class EditorActivity : ComponentActivity() {
         val line = intent.getIntExtra(EXTRA_LINE, -1)
         if (intent.getBooleanExtra(EXTRA_TOGGLE, false)) {
             // A task tapped while the editor is already open: tick it in the text being edited.
-            Markdown.toggleTask(value.text, line)?.let { value = value.copy(text = it) }
+            Markdown.toggleTask(value.text, line, intent.getStringExtra(EXTRA_SOURCE))?.let { value = value.copy(text = it) }
         } else if (line >= 0) {
             // Another line tapped while the editor was still open in the background: go there.
             value = value.copy(selection = TextRange(cursorFor(value.text, line)))
