@@ -144,6 +144,8 @@ class EditorActivity : ComponentActivity() {
     private var savedFolds: Set<Int> = emptySet()
     /** Whether the formatting toolbar shows; remembered per widget. */
     private var showToolbar by mutableStateOf(true)
+    /** Source mode: the raw markdown, unstyled; remembered per widget. */
+    private var sourceMode by mutableStateOf(false)
     /** The table cell being edited, by its table's header line, row (0 the header) and column. */
     private class CellEdit(val table: Int, val row: Int, val col: Int)
     private var cellEdit by mutableStateOf<CellEdit?>(null)
@@ -159,6 +161,7 @@ class EditorActivity : ComponentActivity() {
         widgetId = id
         cfg = WidgetStore.load(this, id) ?: return finish()
         showToolbar = cfg.showToolbar
+        sourceMode = cfg.sourceMode && cfg.showSourceButton
 
         enableEdgeToEdge()
         val line = intent.getIntExtra(EXTRA_LINE, -1)
@@ -368,7 +371,7 @@ class EditorActivity : ComponentActivity() {
         val cellStyle = TextStyle(color = text, fontSize = cfg.textSize.sp, lineHeight = 1.45.em, fontFamily = font)
         val styler = remember { LivePreview(p, cfg.textSize, IntRange.EMPTY, -1) }
         val tables = remember(value.text, collapsed) { Tables.find(value.text, collapsed) }
-        val drawn = tables.filter { t -> active.last < t.start || active.first > t.end }
+        val drawn = if (sourceMode) emptyList() else tables.filter { t -> active.last < t.start || active.first > t.end }
         val textWidth = layout?.layoutInput?.constraints?.maxWidth ?: 0
         val cellPadX = with(density) { 6.dp.roundToPx() }
         val cellPadY = with(density) { 3.dp.roundToPx() }
@@ -404,8 +407,8 @@ class EditorActivity : ComponentActivity() {
             grids.flatMap { g -> g.hs.indices.map { r -> g.table.line(r) to with(density) { g.hs[r].toSp() } } }.toMap()
         }
         val tableRules = remember(grids) { grids.map { it.table.start + 1 }.toSet() }
-        val preview = remember(active, cursor, collapsed, tableRows) { LivePreview(p, cfg.textSize, active, cursor, collapsed, tableRows, tableRules) }
-        val callouts = remember(value.text, collapsed) { LivePreview.calloutBoxes(value.text, p, collapsed) }
+        val preview = remember(active, cursor, collapsed, tableRows, sourceMode) { LivePreview(p, cfg.textSize, active, cursor, collapsed, tableRows, tableRules, sourceMode) }
+        val callouts = remember(value.text, collapsed, sourceMode) { if (sourceMode) emptyList() else LivePreview.calloutBoxes(value.text, p, collapsed) }
         val gutter = with(density) { 22.dp.toPx() }
         val tick = rememberHaptic()
         val padTop = with(density) { 8.dp.toPx() }
@@ -444,6 +447,13 @@ class EditorActivity : ComponentActivity() {
                                 leaveFor(NoteWidgetProvider.configIntent(this@EditorActivity, widgetId, pickOnly = true))
                             },
                     )
+                    if (cfg.showSourceButton) HeaderButton(R.drawable.ic_source, if (sourceMode) "Live preview" else "Source mode", if (sourceMode) accent else muted) {
+                        closeCell()
+                        sourceMode = !sourceMode
+                        WidgetStore.load(this@EditorActivity, widgetId)?.let {
+                            WidgetStore.save(this@EditorActivity, widgetId, it.copy(sourceMode = sourceMode))
+                        }
+                    }
                     HeaderButton(R.drawable.ic_toolbar, if (showToolbar) "Hide toolbar" else "Show toolbar", if (showToolbar) accent else muted) {
                         showToolbar = !showToolbar
                         // Saved onto the widget's latest settings, which may have changed since opening.

@@ -225,6 +225,8 @@ class NoteWidgetProvider : AppWidgetProvider() {
             )
             // Reading mode shows in the accent colour while it's on, like the editor's toolbar toggle.
             color(views, R.id.btn_read, "setColorFilter", looks) { if (cfg.readOnly) it.accent else it.muted }
+            // Shows the mode it's in: a book while reading, a clipboard and pen while editing.
+            views.setImageViewResource(R.id.btn_read, if (cfg.readOnly) R.drawable.ic_read else R.drawable.ic_editing)
             views.setViewVisibility(R.id.btn_settings, if (cfg.showSettings) android.view.View.VISIBLE else android.view.View.GONE)
             views.setOnClickPendingIntent(R.id.btn_read, activity(ctx, id, 7, tapIntent(ctx, id, "read").putExtra(TapActivity.EXTRA_READ, true)))
             views.setOnClickPendingIntent(R.id.btn_refresh, activity(ctx, id, 6, tapIntent(ctx, id, "refresh").putExtra(TapActivity.EXTRA_REFRESH, true)))

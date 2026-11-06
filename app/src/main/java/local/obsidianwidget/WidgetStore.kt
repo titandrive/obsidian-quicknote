@@ -27,6 +27,9 @@ data class WidgetConfig(
     val readOnly: Boolean = false,
     /** Whether the settings cog shows on the widget and its popup (settings are still a long-press away). */
     val showSettings: Boolean = true,
+    /** Whether the popup shows the button for source mode, and whether it's in source mode (raw markdown). */
+    val showSourceButton: Boolean = true,
+    val sourceMode: Boolean = false,
 ) {
     val vaultTree: Uri get() = Uri.parse(vault)
 
@@ -61,6 +64,7 @@ data class WidgetConfig(
         .put("opacity", opacity).put("textSize", textSize.toDouble()).put("showHeader", showHeader)
         .put("vault", vault).put("vaultName", vaultName).put("checkMinutes", checkMinutes).put("showToolbar", showToolbar)
         .put("readOnly", readOnly).put("showSettings", showSettings)
+        .put("showSourceButton", showSourceButton).put("sourceMode", sourceMode)
         .apply {
             colors?.let {
                 put("dark", it.dark.toJson()).put("light", it.light.toJson()).put("vaultMode", it.vaultMode).put("vaultFont", it.font)
@@ -79,6 +83,7 @@ data class WidgetConfig(
             o.optString("vault"), o.optString("vaultName"),
             o.optInt("checkMinutes", 30), o.optBoolean("showToolbar", true), o.optBoolean("readOnly", false),
             o.optBoolean("showSettings", true),
+            o.optBoolean("showSourceButton", true), o.optBoolean("sourceMode", false),
         )
     }
 }

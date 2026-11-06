@@ -40,6 +40,8 @@ class LivePreview(
      */
     private val tableRows: Map<Int, androidx.compose.ui.unit.TextUnit> = emptyMap(),
     private val tableRules: Set<Int> = emptySet(),
+    /** Source mode: the markdown as written, unstyled; folding still works. */
+    private val source: Boolean = false,
 ) : VisualTransformation {
 
     override fun filter(text: AnnotatedString): TransformedText {
@@ -133,7 +135,11 @@ class LivePreview(
                 shownAny = true
                 pendingStart = out.length
                 val rowHeight = tableRows[i]
-                if (rowHeight != null) {
+                if (source) {
+                    out.append(line)
+                    if (raw.length > line.length) out.append("\r")
+                    pending = emptyList()
+                } else if (rowHeight != null) {
                     out.append(line)
                     out.addStyle(hidden, pendingStart, out.length)
                     if (raw.length > line.length) out.append("\r")

@@ -129,6 +129,7 @@ class ConfigActivity : ComponentActivity() {
         var textSize by remember { mutableStateOf(existing?.textSize ?: 14f) }
         var showHeader by remember { mutableStateOf(existing?.showHeader ?: true) }
         var showSettings by remember { mutableStateOf(existing?.showSettings ?: true) }
+        var showSourceButton by remember { mutableStateOf(existing?.showSourceButton ?: true) }
         var checkMinutes by remember { mutableIntStateOf(existing?.checkMinutes ?: 30) }
         var colors by remember { mutableStateOf(existing?.colors) }
         var noteText by remember { mutableStateOf<String?>(null) }
@@ -187,6 +188,7 @@ class ConfigActivity : ComponentActivity() {
             vault = vault.orEmpty(), vaultName = vaultName.orEmpty(), checkMinutes = checkMinutes,
             showToolbar = existing?.showToolbar ?: true,
             readOnly = existing?.readOnly ?: false, showSettings = showSettings,
+            showSourceButton = showSourceButton, sourceMode = (existing?.sourceMode ?: false) && showSourceButton,
         )
         val cfg = current()
 
@@ -305,6 +307,7 @@ class ConfigActivity : ComponentActivity() {
                             StepSlider(textSize.toInt(), 10..19, step = 1) { textSize = it.toFloat() }
                             SwitchRow("Show header", null, showHeader) { showHeader = it }
                             SwitchRow("Show settings button", null, showSettings) { showSettings = it }
+                            SwitchRow("Show source mode button", "In the popup, to edit the raw markdown", showSourceButton) { showSourceButton = it }
                         }
 
                         SectionCard("Updates", R.drawable.ic_refresh) {
@@ -388,7 +391,7 @@ class ConfigActivity : ComponentActivity() {
                         cfg.title.ifEmpty { "Note" }, color = Color(p.title), fontWeight = FontWeight.Bold, fontSize = 15.sp,
                         fontFamily = Fonts.compose(cfg.fontFile), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
                     )
-                    for (icon in listOfNotNull(R.drawable.ic_read, R.drawable.ic_refresh, R.drawable.ic_open, R.drawable.ic_settings.takeIf { cfg.showSettings }, R.drawable.ic_edit)) {
+                    for (icon in listOfNotNull(if (cfg.readOnly) R.drawable.ic_read else R.drawable.ic_editing, R.drawable.ic_refresh, R.drawable.ic_open, R.drawable.ic_settings.takeIf { cfg.showSettings }, R.drawable.ic_edit)) {
                         Icon(painterResource(icon), null, tint = Color(p.muted), modifier = Modifier.padding(8.dp).size(18.dp))
                     }
                 }
