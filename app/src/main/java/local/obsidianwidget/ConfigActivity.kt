@@ -216,7 +216,7 @@ class ConfigActivity : ComponentActivity() {
             }
             if (pickingAlt) {
                 BackHandler { if (pickAltOnly) finish() else pickingAlt = false }
-                NotePicker(notes, altNoteUri, onBack = { if (pickAltOnly) finish() else pickingAlt = false }) { note ->
+                NotePicker(notes, altNoteUri, onBack = { if (pickAltOnly) finish() else pickingAlt = false }, title = "Choose secondary note") { note ->
                     altNotePath = note.path
                     altNoteUri = note.uri.toString()
                     pickingAlt = false
@@ -453,7 +453,7 @@ class ConfigActivity : ComponentActivity() {
     }
 
     @Composable
-    private fun NotePicker(notes: List<Note>?, current: String?, onBack: () -> Unit, onPick: (Note) -> Unit) {
+    private fun NotePicker(notes: List<Note>?, current: String?, onBack: () -> Unit, title: String = "Choose a note", onPick: (Note) -> Unit) {
         var query by remember { mutableStateOf("") }
         val tick = rememberHaptic()
         // Opened onto the current note's folder, as Obsidian reveals the open file.
@@ -463,7 +463,7 @@ class ConfigActivity : ComponentActivity() {
         val guide = MaterialTheme.colorScheme.outlineVariant
         Scaffold(
             containerColor = MaterialTheme.colorScheme.background,
-            topBar = { PageHeader("Choose a note", onBack) },
+            topBar = { PageHeader(title, onBack) },
         ) { pad ->
             Column(Modifier.fillMaxSize().padding(pad)) {
                 val hits = remember(notes, query) { notes?.let { NoteTree.search(it, query) }.orEmpty() }
