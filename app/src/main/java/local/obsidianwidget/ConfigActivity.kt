@@ -452,15 +452,15 @@ class ConfigActivity : ComponentActivity() {
                     .padding(start = 14.dp, end = 8.dp, top = 6.dp, bottom = 12.dp)
                     .heightIn(max = 170.dp),
             ) {
-                if (cfg.showHeader) Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.height(34.dp)) {
+                if (cfg.showHeader) Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.height(38.dp)) {
                     Text(
-                        cfg.title.ifEmpty { "Note" }, color = Color(p.title), fontWeight = FontWeight.Bold, fontSize = 15.sp,
+                        cfg.title.ifEmpty { "Note" }, color = Color(p.title), fontWeight = FontWeight.Bold, fontSize = 16.5.sp,
                         fontFamily = Fonts.compose(cfg.fontFile), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false),
                     )
-                    Icon(painterResource(if (cfg.swaps) R.drawable.ic_swap else R.drawable.ic_folder_open), null, tint = Color(p.muted), modifier = Modifier.padding(start = 6.dp).size(15.dp))
+                    Icon(painterResource(if (cfg.swaps) R.drawable.ic_swap else R.drawable.ic_folder_open), null, tint = Color(p.muted), modifier = Modifier.padding(start = 6.dp).size(16.5.dp))
                     Spacer(Modifier.weight(1f))
                     for (icon in listOfNotNull(if (cfg.readOnly) R.drawable.ic_read else R.drawable.ic_editing, R.drawable.ic_refresh, R.drawable.ic_open, R.drawable.ic_settings.takeIf { cfg.showSettings }, R.drawable.ic_edit)) {
-                        Icon(painterResource(icon), null, tint = Color(p.muted), modifier = Modifier.padding(8.dp).size(18.dp))
+                        Icon(painterResource(icon), null, tint = Color(p.muted), modifier = Modifier.padding(9.dp).size(20.dp))
                     }
                 }
                 NotePreview(blocks, p, cfg.textSize, Fonts.typeface(cfg.fontFile), Modifier.fillMaxWidth().padding(end = 6.dp))

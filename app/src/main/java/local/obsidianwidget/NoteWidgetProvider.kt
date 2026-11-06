@@ -156,9 +156,17 @@ class NoteWidgetProvider : AppWidgetProvider() {
          * order, leaving the widget showing the note it had just left.
          */
         private val drawing = HashMap<Int, Any>()
+        /** How many redraws each widget has been asked for, so one already overtaken can be skipped. */
+        private val asked = HashMap<Int, Int>()
 
         fun update(ctx: Context, mgr: AppWidgetManager, id: Int) {
-            synchronized(synchronized(drawing) { drawing.getOrPut(id) { Any() } }) { draw(ctx, mgr, id) }
+            val ticket = synchronized(drawing) { asked.merge(id, 1, Int::plus)!! }
+            synchronized(synchronized(drawing) { drawing.getOrPut(id) { Any() } }) {
+                // Another redraw asked for since this one draws what's newer anyway: quick taps
+                // through notes draw only the last, rather than each in turn.
+                if (synchronized(drawing) { asked[id] } != ticket) return
+                draw(ctx, mgr, id)
+            }
         }
 
         private fun draw(ctx: Context, mgr: AppWidgetManager, id: Int) {
@@ -286,14 +294,14 @@ class NoteWidgetProvider : AppWidgetProvider() {
         private fun title(ctx: Context, id: Int, cfg: WidgetConfig?, text: String, p: Palette): android.graphics.Bitmap {
             val bold = android.graphics.Typeface.create(Fonts.typeface(cfg?.fontFile), android.graphics.Typeface.BOLD)
             val d = ctx.resources.displayMetrics.density
-            // Room left beside the 34dp buttons and the widget's side padding.
+            // Room left beside the 38dp buttons and the widget's side padding.
             val buttons = if (cfg?.showSettings == false) 4 else 5
-            val max = TextBitmaps.widgetWidth(ctx, id) - ((14 + 6 + buttons * 34) * d).toInt()
-            if (cfg == null) return TextBitmaps.line(ctx, text, max, TextBitmaps.paint(ctx, bold, 15f, p.title))
+            val max = TextBitmaps.widgetWidth(ctx, id) - ((14 + 6 + buttons * 38) * d).toInt()
+            if (cfg == null) return TextBitmaps.line(ctx, text, max, TextBitmaps.paint(ctx, bold, 16.5f, p.title))
             // An icon after the name says what a tap does: swap notes (an arrow), or pick one (a folder).
-            val icon = (15 * ctx.resources.displayMetrics.scaledDensity).toInt()
+            val icon = (16.5f * ctx.resources.displayMetrics.scaledDensity).toInt()
             val gap = (6 * d).toInt()
-            val name = TextBitmaps.line(ctx, text, max - icon - gap, TextBitmaps.paint(ctx, bold, 15f, p.title))
+            val name = TextBitmaps.line(ctx, text, max - icon - gap, TextBitmaps.paint(ctx, bold, 16.5f, p.title))
             val out = android.graphics.Bitmap.createBitmap(name.width + gap + icon, maxOf(name.height, icon), android.graphics.Bitmap.Config.ARGB_8888)
             out.density = name.density
             val canvas = android.graphics.Canvas(out)

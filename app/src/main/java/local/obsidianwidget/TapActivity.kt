@@ -21,6 +21,7 @@ class TapActivity : Activity() {
         const val EXTRA_FOLD = "fold"
         /** Swaps the widget's two notes. */
         const val EXTRA_SWAP = "swap"
+        private val SWAPS = Any()
         /** Turns reading mode on or off. */
         const val EXTRA_READ = "read"
     }
@@ -45,9 +46,12 @@ class TapActivity : Activity() {
             intent.getBooleanExtra(EXTRA_SWAP, false) -> {
                 val app = applicationContext
                 thread {
-                    val cfg = WidgetStore.load(app, id)?.takeIf { it.swaps } ?: return@thread
-                    Folds.swap(app, id, cfg.notePath, cfg.next().path)
-                    WidgetStore.save(app, id, cfg.swapped())
+                    // A tap at a time, so each one moves on a note from where the last left it.
+                    synchronized(SWAPS) {
+                        val cfg = WidgetStore.load(app, id)?.takeIf { it.swaps } ?: return@thread
+                        Folds.swap(app, id, cfg.notePath, cfg.next().path)
+                        WidgetStore.save(app, id, cfg.swapped())
+                    }
                     NoteWidgetProvider.update(app, AppWidgetManager.getInstance(app), id)
                 }
             }
