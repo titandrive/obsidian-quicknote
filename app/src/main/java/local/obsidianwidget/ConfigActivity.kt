@@ -304,11 +304,7 @@ class ConfigActivity : ComponentActivity() {
                             SettingLabel("Text size", value = "${textSize.toInt()}")
                             StepSlider(textSize.toInt(), 10..19, step = 1) { textSize = it.toFloat() }
                             SwitchRow("Show header", null, showHeader) { showHeader = it }
-                            SwitchRow(
-                                "Show settings button",
-                                if (showSettings) null else "Long-press the widget to get back here",
-                                showSettings,
-                            ) { showSettings = it }
+                            SwitchRow("Show settings button", null, showSettings) { showSettings = it }
                         }
 
                         SectionCard("Updates", R.drawable.ic_refresh) {
