@@ -467,8 +467,8 @@ object NoteRows {
 
     /**
      * One row's view; with [night], the launcher shows that one instead while in dark mode. In
-     * [reading] mode a tap anywhere on a task ticks it; otherwise only on its checkbox, and the rest
-     * of the line opens the editor there.
+     * [reading] mode a tap anywhere on a task ticks it, and anywhere on a foldable line folds it;
+     * otherwise only the checkbox ticks and the arrow folds, and the rest of the line opens the editor there.
      */
     fun view(ctx: Context, row: Row, night: Row? = null, reading: Boolean = false): RemoteViews = RemoteViews(ctx.packageName, R.layout.widget_item).apply {
         val day = Icon.createWithData(row.image, 0, row.image.size)
@@ -480,7 +480,9 @@ object NoteRows {
         row.text?.let { setContentDescription(R.id.item_img, it) }
         setOnClickFillInIntent(
             R.id.item,
-            Intent().putExtra(EditorActivity.EXTRA_LINE, row.line).putExtra(EditorActivity.EXTRA_TOGGLE, row.task && reading)
+            // In reading mode a tap anywhere on a foldable line folds it (a task's ticks it instead).
+            if (reading && !row.task && row.fold >= 0) Intent().putExtra(TapActivity.EXTRA_FOLD, row.fold)
+            else Intent().putExtra(EditorActivity.EXTRA_LINE, row.line).putExtra(EditorActivity.EXTRA_TOGGLE, row.task && reading)
                 .putExtra(EditorActivity.EXTRA_SOURCE, row.source),
         )
         if (row.task && !reading && row.boxX >= 0) {
