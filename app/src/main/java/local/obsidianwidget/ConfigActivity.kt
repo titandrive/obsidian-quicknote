@@ -295,9 +295,17 @@ class ConfigActivity : ComponentActivity() {
 
                         SectionCard("Note", R.drawable.ic_note) {
                             val primary = MaterialTheme.colorScheme.primary
+                            // The vault first, since it's picked first.
+                            NavRow(
+                                title = vaultName!!,
+                                subtitle = "Vault folder",
+                                leading = { IconTile(R.drawable.ic_folder, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
+                                onClick = { pickVault.launch(null) },
+                            )
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                             NavRow(
                                 title = notePath?.substringAfterLast('/')?.removeSuffix(".md") ?: "Choose a note",
-                                subtitle = notePath?.substringBeforeLast('/', "")?.ifEmpty { "Vault root" } ?: "Nothing picked yet",
+                                subtitle = if (switchNotes) "Primary note" else null,
                                 onClick = { picking = true },
                             )
                             SwitchRow("Swap notes", "Tap the note's title to quickly swap between two notes", switchNotes) {
@@ -316,17 +324,10 @@ class ConfigActivity : ComponentActivity() {
                             ) {
                                 NavRow(
                                     title = altNotePath.substringAfterLast('/').removeSuffix(".md").ifEmpty { "Choose a note to swap with" },
-                                    subtitle = if (altNotePath.isEmpty()) "Nothing picked yet" else "Swaps with this note",
+                                    subtitle = "Secondary note",
                                     onClick = { pickingAlt = true },
                                 )
                             }
-                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                            NavRow(
-                                title = vaultName!!,
-                                subtitle = "Vault folder",
-                                leading = { IconTile(R.drawable.ic_folder, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
-                                onClick = { pickVault.launch(null) },
-                            )
                         }
 
                         SectionCard("Appearance", R.drawable.ic_palette) {
