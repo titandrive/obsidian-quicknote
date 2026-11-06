@@ -348,8 +348,9 @@ class ConfigActivity : ComponentActivity() {
                             SettingLabel("Text size", value = "${textSize.toInt()}")
                             StepSlider(textSize.toInt(), 10..19, step = 1) { textSize = it.toFloat() }
                             SwitchRow("Show header", null, showHeader) { showHeader = it }
-                            SwitchRow("Show settings button", null, showSettings) { showSettings = it }
-                            SwitchRow("Show source mode button", "In the popup, to edit the raw markdown", showSourceButton) { showSourceButton = it }
+                            // The settings button is in the header, so it only applies while the header shows.
+                            if (showHeader) SwitchRow("Show settings button", null, showSettings) { showSettings = it }
+                            SwitchRow("Show source mode button", "Shows source mode button in edit modal", showSourceButton) { showSourceButton = it }
                         }
 
                         SectionCard("Updates", R.drawable.ic_refresh) {
