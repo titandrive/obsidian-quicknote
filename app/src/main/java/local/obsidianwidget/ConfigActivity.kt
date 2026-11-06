@@ -209,8 +209,8 @@ class ConfigActivity : ComponentActivity() {
                 NotePicker(notes, noteUri, onBack = { if (pickOnly) finish() else picking = false }) { note ->
                     notePath = note.path
                     noteUri = note.uri.toString()
-                    picking = false
-                    if (pickOnly) scope.launch { save(current()) }
+                    // Picked from the widget: stay on the picker while saving, rather than flash the settings.
+                    if (pickOnly) scope.launch { save(current()) } else picking = false
                 }
                 return@AppTheme
             }
@@ -219,8 +219,7 @@ class ConfigActivity : ComponentActivity() {
                 NotePicker(notes, altNoteUri, onBack = { if (pickAltOnly) finish() else pickingAlt = false }, title = "Choose secondary note") { note ->
                     altNotePath = note.path
                     altNoteUri = note.uri.toString()
-                    pickingAlt = false
-                    if (pickAltOnly) scope.launch { save(current()) }
+                    if (pickAltOnly) scope.launch { save(current()) } else pickingAlt = false
                 }
                 return@AppTheme
             }
