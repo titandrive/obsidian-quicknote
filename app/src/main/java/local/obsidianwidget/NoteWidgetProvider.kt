@@ -122,7 +122,32 @@ class NoteWidgetProvider : AppWidgetProvider() {
          * Most a note's rows may add up to and still be sent with the widget. The system passes the
          * widget on to the launcher in a one-way call, which fails quietly past about 512 KB.
          */
-        private const val INLINE_LIMIT = 450_000
+        private const val INLINE_LIMIT = 300_000
+
+        /**
+         * The most a widget update may weigh, rows included. Android hands updates to the launcher in
+         * one binder transaction; one too big (about 650 KB was) is dropped, and the launcher went on
+         * showing the widget as it was, with taps that no longer did anything.
+         */
+        private const val UPDATE_BUDGET = 400_000
+
+        private fun parcelSize(p: android.os.Parcelable): Int {
+            val parcel = android.os.Parcel.obtain()
+            return try {
+                p.writeToParcel(parcel, 0)
+                parcel.dataSize()
+            } finally {
+                parcel.recycle()
+            }
+        }
+
+        /** A bitmap as a compressed icon: a fraction of the raw pixels' size in the update. */
+        private fun png(b: android.graphics.Bitmap): android.graphics.drawable.Icon {
+            val out = java.io.ByteArrayOutputStream()
+            b.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, out)
+            val bytes = out.toByteArray()
+            return android.graphics.drawable.Icon.createWithData(bytes, 0, bytes.size)
+        }
 
         /** Redraws the widget, note and all. Reads and renders the note, so call it off the main thread. */
         fun update(ctx: Context, mgr: AppWidgetManager, id: Int) {
@@ -159,13 +184,9 @@ class NoteWidgetProvider : AppWidgetProvider() {
             views.setViewPadding(R.id.list, 0, if (cfg.showHeader) 0 else dp(ctx, 6), 0, 0)
             val night = looks.night
             if (night != null && android.os.Build.VERSION.SDK_INT >= 31) {
-                views.setIcon(
-                    R.id.title, "setImageIcon",
-                    android.graphics.drawable.Icon.createWithBitmap(title(ctx, id, cfg, cfg.title, p)),
-                    android.graphics.drawable.Icon.createWithBitmap(title(ctx, id, cfg, cfg.title, night)),
-                )
+                views.setIcon(R.id.title, "setImageIcon", png(title(ctx, id, cfg, cfg.title, p)), png(title(ctx, id, cfg, cfg.title, night)))
             } else {
-                views.setImageViewBitmap(R.id.title, title(ctx, id, cfg, cfg.title, p))
+                views.setImageViewIcon(R.id.title, png(title(ctx, id, cfg, cfg.title, p)))
             }
             views.setContentDescription(R.id.title, cfg.title)
             views.setTextViewText(R.id.empty, ctx.getString(R.string.empty_note))
@@ -175,14 +196,17 @@ class NoteWidgetProvider : AppWidgetProvider() {
             val rows = if (android.os.Build.VERSION.SDK_INT >= 31) NoteRows.build(ctx, id) else null
             // Which route is decided by the whole note, unfolded, so folding never switches it: a
             // switch rebuilt the list, which showed "Empty note" for a moment before the rows came.
-            val inline = rows != null && NoteRows.wholeSize(ctx, id) < INLINE_LIMIT
             val routes = ctx.getSharedPreferences("routes", Context.MODE_PRIVATE)
             val wasInline = routes.getBoolean("inline$id", false)
-            if (inline && android.os.Build.VERSION.SDK_INT >= 31) {
-                val items = RemoteViews.RemoteCollectionItems.Builder().setHasStableIds(true).setViewTypeCount(1)
-                val ids = NoteRows.ids(rows!!.rows)
-                rows.rows.forEachIndexed { i, row -> items.addItem(ids[i], NoteRows.view(ctx, row, rows.night?.getOrNull(i), cfg.readOnly)) }
-                views.setRemoteAdapter(R.id.list, items.build())
+            // Handed over with the update only if that keeps the whole update within its budget.
+            val items = if (rows != null && android.os.Build.VERSION.SDK_INT >= 31 && NoteRows.wholeSize(ctx, id) < INLINE_LIMIT) {
+                val builder = RemoteViews.RemoteCollectionItems.Builder().setHasStableIds(true).setViewTypeCount(1)
+                val ids = NoteRows.ids(rows.rows)
+                rows.rows.forEachIndexed { i, row -> builder.addItem(ids[i], NoteRows.view(ctx, row, rows.night?.getOrNull(i), cfg.readOnly)) }
+                builder.build().takeIf { parcelSize(it) + parcelSize(views) < UPDATE_BUDGET }
+            } else null
+            if (items != null && android.os.Build.VERSION.SDK_INT >= 31) {
+                views.setRemoteAdapter(R.id.list, items)
                 routes.edit().putBoolean("inline$id", true).apply()
             } else {
                 // A list that went from fetching rows to being handed them, and back, takes the same
@@ -236,8 +260,13 @@ class NoteWidgetProvider : AppWidgetProvider() {
             views.setViewVisibility(R.id.btn_settings, if (cfg.showSettings) android.view.View.VISIBLE else android.view.View.GONE)
             views.setOnClickPendingIntent(R.id.btn_read, activity(ctx, id, 7, tapIntent(ctx, id, "read").putExtra(TapActivity.EXTRA_READ, true)))
             views.setOnClickPendingIntent(R.id.btn_refresh, activity(ctx, id, 6, tapIntent(ctx, id, "refresh").putExtra(TapActivity.EXTRA_REFRESH, true)))
-            mgr.updateAppWidget(id, views)
-            if (!inline) mgr.notifyAppWidgetViewDataChanged(id, R.id.list)
+            try {
+                mgr.updateAppWidget(id, views)
+            } catch (e: RuntimeException) {
+                android.util.Log.w("QuicknoteWidget", "Widget $id update failed (${parcelSize(views)} bytes)", e)
+                throw e
+            }
+            if (items == null) mgr.notifyAppWidgetViewDataChanged(id, R.id.list)
             ChangeCheck.drawn(ctx, id, cfg)
         }
 
