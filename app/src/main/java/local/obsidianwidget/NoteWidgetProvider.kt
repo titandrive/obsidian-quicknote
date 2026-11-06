@@ -289,8 +289,8 @@ class NoteWidgetProvider : AppWidgetProvider() {
             // Room left beside the 34dp buttons and the widget's side padding.
             val buttons = if (cfg?.showSettings == false) 4 else 5
             val max = TextBitmaps.widgetWidth(ctx, id) - ((14 + 6 + buttons * 34) * d).toInt()
-            if (cfg?.swaps != true) return TextBitmaps.line(ctx, text, max, TextBitmaps.paint(ctx, bold, 15f, p.title))
-            // Swapping notes: an arrow after the name says a tap swaps rather than picks.
+            if (cfg == null) return TextBitmaps.line(ctx, text, max, TextBitmaps.paint(ctx, bold, 15f, p.title))
+            // An icon after the name says what a tap does: swap notes (an arrow), or pick one (a folder).
             val icon = (15 * ctx.resources.displayMetrics.scaledDensity).toInt()
             val gap = (6 * d).toInt()
             val name = TextBitmaps.line(ctx, text, max - icon - gap, TextBitmaps.paint(ctx, bold, 15f, p.title))
@@ -298,7 +298,7 @@ class NoteWidgetProvider : AppWidgetProvider() {
             out.density = name.density
             val canvas = android.graphics.Canvas(out)
             canvas.drawBitmap(name, 0f, (out.height - name.height) / 2f, null)
-            androidx.core.content.ContextCompat.getDrawable(ctx, R.drawable.ic_swap)?.mutate()?.apply {
+            androidx.core.content.ContextCompat.getDrawable(ctx, if (cfg.swaps) R.drawable.ic_swap else R.drawable.ic_folder_open)?.mutate()?.apply {
                 setTint(p.muted)
                 val top = (out.height - icon) / 2
                 setBounds(name.width + gap, top, name.width + gap + icon, top + icon)

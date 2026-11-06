@@ -433,7 +433,7 @@ class ConfigActivity : ComponentActivity() {
                         cfg.title.ifEmpty { "Note" }, color = Color(p.title), fontWeight = FontWeight.Bold, fontSize = 15.sp,
                         fontFamily = Fonts.compose(cfg.fontFile), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false),
                     )
-                    if (cfg.swaps) Icon(painterResource(R.drawable.ic_swap), null, tint = Color(p.muted), modifier = Modifier.padding(start = 6.dp).size(15.dp))
+                    Icon(painterResource(if (cfg.swaps) R.drawable.ic_swap else R.drawable.ic_folder_open), null, tint = Color(p.muted), modifier = Modifier.padding(start = 6.dp).size(15.dp))
                     Spacer(Modifier.weight(1f))
                     for (icon in listOfNotNull(if (cfg.readOnly) R.drawable.ic_read else R.drawable.ic_editing, R.drawable.ic_refresh, R.drawable.ic_open, R.drawable.ic_settings.takeIf { cfg.showSettings }, R.drawable.ic_edit)) {
                         Icon(painterResource(icon), null, tint = Color(p.muted), modifier = Modifier.padding(8.dp).size(18.dp))
