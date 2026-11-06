@@ -78,6 +78,8 @@ class ConfigActivity : ComponentActivity() {
     companion object {
         /** Opened by tapping the widget's note name: just the note list, saved on tap. */
         const val EXTRA_PICK_ONLY = "pick_only"
+        /** With [EXTRA_PICK_ONLY]: pick the note to swap with, rather than the widget's note. */
+        const val EXTRA_PICK_ALT = "pick_alt"
 
         private val MODES = listOf("vault", "system", "light", "dark")
     }
@@ -93,8 +95,9 @@ class ConfigActivity : ComponentActivity() {
 
         val existing = WidgetStore.load(this, widgetId)
         val pickOnly = intent.getBooleanExtra(EXTRA_PICK_ONLY, false) && existing != null
+        val pickAlt = pickOnly && intent.getBooleanExtra(EXTRA_PICK_ALT, false)
         enableEdgeToEdge()
-        setContent { Screen(existing, pickOnly) }
+        setContent { Screen(existing, pickOnly && !pickAlt, pickAlt) }
     }
 
     private suspend fun save(cfg: WidgetConfig) {
@@ -110,7 +113,7 @@ class ConfigActivity : ComponentActivity() {
     }
 
     @Composable
-    private fun Screen(existing: WidgetConfig?, pickOnly: Boolean) {
+    private fun Screen(existing: WidgetConfig?, pickOnly: Boolean, pickAltOnly: Boolean = false) {
         val scope = rememberCoroutineScope()
         // This widget's vault; a new widget starts with the app's default one.
         var vault by remember { mutableStateOf(existing?.vault?.takeIf { it.isNotEmpty() } ?: Vault.defaultTree(this)?.toString()) }
@@ -137,7 +140,7 @@ class ConfigActivity : ComponentActivity() {
         var switchNotes by remember { mutableStateOf(existing?.switchNotes ?: false) }
         var altNotePath by remember { mutableStateOf(existing?.altNotePath.orEmpty()) }
         var altNoteUri by remember { mutableStateOf(existing?.altNoteUri.orEmpty()) }
-        var pickingAlt by remember { mutableStateOf(false) }
+        var pickingAlt by remember { mutableStateOf(pickAltOnly) }
         var pickingTheme by remember { mutableStateOf(false) }
         var previewBounds by remember { mutableStateOf<Rect?>(null) }
 
@@ -212,11 +215,12 @@ class ConfigActivity : ComponentActivity() {
                 return@AppTheme
             }
             if (pickingAlt) {
-                BackHandler { pickingAlt = false }
-                NotePicker(notes, altNoteUri, onBack = { pickingAlt = false }) { note ->
+                BackHandler { if (pickAltOnly) finish() else pickingAlt = false }
+                NotePicker(notes, altNoteUri, onBack = { if (pickAltOnly) finish() else pickingAlt = false }) { note ->
                     altNotePath = note.path
                     altNoteUri = note.uri.toString()
                     pickingAlt = false
+                    if (pickAltOnly) scope.launch { save(current()) }
                 }
                 return@AppTheme
             }
@@ -427,8 +431,10 @@ class ConfigActivity : ComponentActivity() {
                 if (cfg.showHeader) Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.height(34.dp)) {
                     Text(
                         cfg.title.ifEmpty { "Note" }, color = Color(p.title), fontWeight = FontWeight.Bold, fontSize = 15.sp,
-                        fontFamily = Fonts.compose(cfg.fontFile), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
+                        fontFamily = Fonts.compose(cfg.fontFile), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false),
                     )
+                    if (cfg.swaps) Icon(painterResource(R.drawable.ic_swap), null, tint = Color(p.muted), modifier = Modifier.padding(start = 6.dp).size(15.dp))
+                    Spacer(Modifier.weight(1f))
                     for (icon in listOfNotNull(if (cfg.readOnly) R.drawable.ic_read else R.drawable.ic_editing, R.drawable.ic_refresh, R.drawable.ic_open, R.drawable.ic_settings.takeIf { cfg.showSettings }, R.drawable.ic_edit)) {
                         Icon(painterResource(icon), null, tint = Color(p.muted), modifier = Modifier.padding(8.dp).size(18.dp))
                     }

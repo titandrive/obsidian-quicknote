@@ -218,7 +218,8 @@ class NoteWidgetProvider : AppWidgetProvider() {
             views.setOnClickPendingIntent(
                 R.id.title,
                 if (cfg.swaps) activity(ctx, id, 8, tapIntent(ctx, id, "swap").putExtra(TapActivity.EXTRA_SWAP, true))
-                else activity(ctx, id, 3, tapIntent(ctx, id, "pick").putExtra(TapActivity.EXTRA_FORWARD, configIntent(ctx, id, pickOnly = true))),
+                // Swapping on, but nothing to swap with yet: pick the second note.
+                else activity(ctx, id, 3, tapIntent(ctx, id, "pick").putExtra(TapActivity.EXTRA_FORWARD, configIntent(ctx, id, pickOnly = true, pickAlt = cfg.switchNotes))),
             )
             views.setOnClickPendingIntent(R.id.btn_settings, activity(ctx, id, 4, tapIntent(ctx, id, "settings").putExtra(TapActivity.EXTRA_FORWARD, configIntent(ctx, id, pickOnly = false))))
             views.setOnClickPendingIntent(
@@ -248,7 +249,22 @@ class NoteWidgetProvider : AppWidgetProvider() {
             // Room left beside the 34dp buttons and the widget's side padding.
             val buttons = if (cfg?.showSettings == false) 4 else 5
             val max = TextBitmaps.widgetWidth(ctx, id) - ((14 + 6 + buttons * 34) * d).toInt()
-            return TextBitmaps.line(ctx, text, max, TextBitmaps.paint(ctx, bold, 15f, p.title))
+            if (cfg?.swaps != true) return TextBitmaps.line(ctx, text, max, TextBitmaps.paint(ctx, bold, 15f, p.title))
+            // Swapping notes: an arrow after the name says a tap swaps rather than picks.
+            val icon = (15 * ctx.resources.displayMetrics.scaledDensity).toInt()
+            val gap = (6 * d).toInt()
+            val name = TextBitmaps.line(ctx, text, max - icon - gap, TextBitmaps.paint(ctx, bold, 15f, p.title))
+            val out = android.graphics.Bitmap.createBitmap(name.width + gap + icon, maxOf(name.height, icon), android.graphics.Bitmap.Config.ARGB_8888)
+            out.density = name.density
+            val canvas = android.graphics.Canvas(out)
+            canvas.drawBitmap(name, 0f, (out.height - name.height) / 2f, null)
+            androidx.core.content.ContextCompat.getDrawable(ctx, R.drawable.ic_swap)?.mutate()?.apply {
+                setTint(p.muted)
+                val top = (out.height - icon) / 2
+                setBounds(name.width + gap, top, name.width + gap + icon, top + icon)
+                draw(canvas)
+            }
+            return out
         }
 
         /** Redraws every widget showing [noteUri], e.g. after the editor saved it. */
@@ -274,10 +290,11 @@ class NoteWidgetProvider : AppWidgetProvider() {
             .setData(Uri.parse("widget://$id/edit"))
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
 
-        fun configIntent(ctx: Context, id: Int, pickOnly: Boolean) = Intent(ctx, ConfigActivity::class.java)
+        fun configIntent(ctx: Context, id: Int, pickOnly: Boolean, pickAlt: Boolean = false) = Intent(ctx, ConfigActivity::class.java)
             .putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, id)
             .putExtra(ConfigActivity.EXTRA_PICK_ONLY, pickOnly)
-            .setData(Uri.parse("widget://$id/config/$pickOnly"))
+            .putExtra(ConfigActivity.EXTRA_PICK_ALT, pickAlt)
+            .setData(Uri.parse("widget://$id/config/$pickOnly/$pickAlt"))
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
 
         private fun activity(ctx: Context, id: Int, slot: Int, intent: Intent) = PendingIntent.getActivity(
