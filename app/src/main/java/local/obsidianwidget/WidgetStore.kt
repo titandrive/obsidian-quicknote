@@ -23,7 +23,7 @@ data class WidgetConfig(
     val checkMinutes: Int = 30,
     /** Whether the editor shows its formatting toolbar for this widget's note. */
     val showToolbar: Boolean = true,
-    /** Reading mode: taps on the widget's lines don't edit or tick anything; folding still works. */
+    /** Reading mode: taps on the widget's lines don't open the editor; tasks still tick and folds still fold. */
     val readOnly: Boolean = false,
     /** Whether the settings cog shows on the widget and its popup (settings are still a long-press away). */
     val showSettings: Boolean = true,

@@ -54,13 +54,14 @@ class TapActivity : Activity() {
                     .putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, id),
             )
             else -> {
-                // A line of the note: tick a task off, or edit there; neither in reading mode.
+                // A line of the note: tick a task off, or edit there (not in reading mode, which
+                // still ticks tasks, as Obsidian's reading view does).
                 val line = intent.getIntExtra(EditorActivity.EXTRA_LINE, -1)
-                val cfg = WidgetStore.load(this, id)?.takeIf { !it.readOnly }
+                val cfg = WidgetStore.load(this, id)
                 if (cfg != null && intent.getBooleanExtra(EditorActivity.EXTRA_TOGGLE, false)) {
                     val app = applicationContext
                     thread { EditorActivity.toggleTask(app, cfg, line) }
-                } else if (cfg != null) {
+                } else if (cfg != null && !cfg.readOnly) {
                     startActivity(NoteWidgetProvider.editorIntent(this, id).putExtra(EditorActivity.EXTRA_LINE, line))
                 }
             }
