@@ -122,7 +122,7 @@ class NoteWidgetProvider : AppWidgetProvider() {
          * Most a note's rows may add up to and still be sent with the widget. The system passes the
          * widget on to the launcher in a one-way call, which fails quietly past about 512 KB.
          */
-        private const val INLINE_LIMIT = 300_000
+        const val INLINE_LIMIT = 300_000
 
         /**
          * The most a widget update may weigh, rows included. Android hands updates to the launcher in

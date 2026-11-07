@@ -25,18 +25,21 @@ object NoteRows {
     /**
      * One strip of the note. Every strip is the same height, one line of body text, so the
      * placeholders a launcher shows while fetching rows are exactly the right size and nothing
-     * shifts as real rows arrive. [image] is the strip compressed (a few KB); [line] is the note
-     * line it shows, and [task] whether that line is a task, for taps.
+     * shifts as real rows arrive. [image] is the strip compressed (a few KB), drawn the first time
+     * it's wanted, so a long note's rows cost only as they're shown; [sig] stands for what it shows.
+     * [line] is the note line it shows, and [task] whether that line is a task, for taps.
      */
     class Row(
-        val image: ByteArray, val line: Int, val task: Boolean, val text: CharSequence?,
+        draw: () -> ByteArray, val sig: Long, val line: Int, val task: Boolean, val text: CharSequence?,
         /** The foldable line whose arrow is in this strip, or -1; and whether it's folded. */
         val fold: Int = -1, val folded: Boolean = false,
         /** For a task, its line as written, so a tick can find it if the note changed since. */
         val source: String? = null,
         /** For a strip beside a task's checkbox, the box's middle, in px across the strip; else -1. */
         val boxX: Int = -1,
-    )
+    ) {
+        val image: ByteArray by lazy(draw)
+    }
 
     /** One block laid out on the note's tall imaginary canvas, [top] to [top] + [height]. */
     private class Piece(
@@ -82,7 +85,12 @@ object NoteRows {
         val memo = ctx.getSharedPreferences("routes", Context.MODE_PRIVATE)
         if (memo.getString("sizeKey$slot", null) == key) return memo.getInt("size$slot", Int.MAX_VALUE)
         val whole = build(ctx, id, true, text, cfg) ?: return Int.MAX_VALUE
-        val size = whole.rows.sumOf { it.image.size } + whole.night.orEmpty().sumOf { it.image.size }
+        // Only as far as it takes to tell it's too big to send at once, so a long note isn't all drawn.
+        var size = 0
+        for ((i, row) in whole.rows.withIndex()) {
+            size += row.image.size + (whole.night?.getOrNull(i)?.image?.size ?: 0)
+            if (size >= NoteWidgetProvider.INLINE_LIMIT) break
+        }
         memo.edit().putString("sizeKey$slot", key).putInt("size$slot", size).apply()
         return size
     }
@@ -139,12 +147,24 @@ object NoteRows {
         val iconSize = (18 * css).toInt()
         val iconGap = (4 * css).toInt()
 
-        // Stack the blocks: code blocks get padding and a background, rules are a thin line.
+        // Everything besides a block's own content that goes into how it's laid out and drawn.
+        val res = ctx.resources
+        val look = listOf(
+            p.toJson().toString(), cfg.fontFile, cfg.textSize, fullWidth, gutter, res.displayMetrics.densityDpi, res.configuration.fontScale,
+            ctx.packageManager.getPackageInfo(ctx.packageName, 0).lastUpdateTime,
+        ).joinToString("\u0000")
+
+        // Stack the blocks: code blocks get padding and a background, rules are a thin line. A
+        // block laid out before, the same and in the same look, is taken as it was, so an edit
+        // lays out only what it changed.
         val pieces = ArrayList<Piece>()
+        val sigs = ArrayList<Long>()
         var y = 0
         for (b in blocks) {
             val callout = b.callout
-            val piece = when {
+            val sig = blockSig(look, b)
+            val known = synchronized(layouts) { layouts[sig] }
+            val piece = if (known != null) Piece(b, known.layout, y, known.height, known.pad, known.table, known.textX, known.textTop) else when {
                 callout != null -> {
                     val x = boxLeft + if (callout.icon != null) iconSize + iconGap else 0
                     val l = layout(b.text, width - x - boxPad)
@@ -159,8 +179,9 @@ object NoteRows {
                     Piece(b, l, y, l.height + 2 * dp(ctx, 6), pad)
                 }
                 else -> layout(b.text, width).let { Piece(b, it, y, it.height, 0) }
-            }
+            }.also { synchronized(layouts) { layouts[sig] = it } }
             pieces.add(piece)
+            sigs.add(sig)
             y += piece.height
         }
 
@@ -194,8 +215,31 @@ object NoteRows {
             strokeCap = Paint.Cap.ROUND
             strokeJoin = Paint.Join.ROUND
         }
-        val rows = (0 until count).map { i ->
-            val top = i * strip
+        val r = dp(ctx, 4)
+        // The blocks reaching into [from, to): they're stacked in order, so found by bisecting.
+        val ends = IntArray(pieces.size) { pieces[it].top + pieces[it].height }
+        fun near(from: Int, to: Int): IntRange {
+            var lo = 0
+            var hi = pieces.size
+            while (lo < hi) { val m = (lo + hi) / 2; if (ends[m] <= from) lo = m + 1 else hi = m }
+            var end = lo
+            while (end < pieces.size && pieces[end].top < to) end++
+            return lo until end
+        }
+        // A strip's look: the blocks in it (and arrows reaching into it), each where it sits, and
+        // the callout boxes. Strips that look the same as one drawn before reuse its bytes, so a
+        // change redraws only the strips it touches.
+        fun stripSig(top: Int): Long {
+            var h = look.hashCode().toLong() * 1_000_003 + strip
+            for (k in near(top - r, top + strip + r)) h = h * 1_000_003 + sigs[k] * 31 + (pieces[k].top - top)
+            for (box in boxes) {
+                if (box.bottom <= top || box.top >= top + strip) continue
+                h = h * 1_000_003 + ((box.top - top).toLong() shl 32) + (box.bottom - top) * 31L + box.color
+            }
+            return h
+        }
+        fun draw(top: Int, sig: Long): ByteArray = synchronized(drawn) {
+            drawn[sig]?.let { return it }
             val bmp = Bitmap.createBitmap(fullWidth, strip, Bitmap.Config.ARGB_8888)
             bmp.density = ctx.resources.displayMetrics.densityDpi
             val canvas = Canvas(bmp)
@@ -211,8 +255,8 @@ object NoteRows {
                     canvas.drawRoundRect(inset, box.top + inset, width - inset, box.bottom - inset, boxRadius, boxRadius, boxBorder)
                 }
             }
-            for (piece in pieces) {
-                if (piece.top + piece.height <= top || piece.top >= top + strip) continue
+            for (k in near(top, top + strip)) {
+                val piece = pieces[k]
                 canvas.save()
                 canvas.translate(0f, piece.top.toFloat())
                 when {
@@ -244,21 +288,31 @@ object NoteRows {
                 }
                 canvas.restore()
             }
-            // Fold arrows in the gutter, beside each foldable line's first line of text.
-            // An arrow can straddle two strips (big headings put it on the border), so each strip it
-            // overlaps draws its part. Every strip beside the foldable line's first row of text takes
-            // taps for it, so a big heading's arrow is as easy to hit as its text is tall.
-            // When two lines' rows both reach into a strip (a big heading's spills into the next
-            // line's), the strip goes to the one covering more of it.
-            var fold: Piece? = null
-            var foldOverlap = 0
-            val r = dp(ctx, 4)
-            for (piece in pieces) {
+            // Fold arrows in the gutter, beside each foldable line's first line of text. An arrow
+            // can straddle two strips (big headings put it on the border), so each strip it
+            // overlaps draws its part.
+            for (k in near(top - r, top + strip + r)) {
+                val piece = pieces[k]
                 if (piece.block.fold == Block.NONE) continue
                 val y = arrowY(piece)
                 if (y + r >= top && y - r < top + strip) {
                     drawArrow(canvas, -gutter / 2f, y.toFloat(), r.toFloat(), piece.block.fold == Block.FOLDED, arrow)
                 }
+            }
+            compress(bmp).also { drawn[sig] = it }
+        }
+        val rows = (0 until count).map { i ->
+            val top = i * strip
+            val sig = stripSig(top)
+            // Every strip beside the foldable line's first row of text takes taps for it, so a big
+            // heading's arrow is as easy to hit as its text is tall. When two lines' rows both
+            // reach into a strip (a big heading's spills into the next line's), the strip goes to
+            // the one covering more of it.
+            val here = near(top, top + strip).map { pieces[it] }
+            var fold: Piece? = null
+            var foldOverlap = 0
+            for (piece in here) {
+                if (piece.block.fold == Block.NONE) continue
                 val (rowTop, rowBottom) = firstRow(piece)
                 val overlap = minOf(rowBottom, top + strip) - maxOf(rowTop, top)
                 if (overlap > foldOverlap) {
@@ -270,8 +324,8 @@ object NoteRows {
             // into the strip takes it, since strips don't line up with lines, and a tap on a task's
             // top or bottom edge went to the line beside it.
             val mid = top + strip / 2
-            val middle = pieces.firstOrNull { mid < it.top + it.height } ?: pieces.last()
-            val under = if (middle.block.task) middle else pieces.filter { it.block.task }
+            val middle = pieces.getOrNull(near(mid, mid + 1).first) ?: pieces.last()
+            val under = if (middle.block.task) middle else here.filter { it.block.task }
                 .maxByOrNull { minOf(it.top + it.height, top + strip) - maxOf(it.top, top) }
                 ?.takeIf { minOf(it.top + it.height, top + strip) - maxOf(it.top, top) >= strip / 3 } ?: middle
             // A task's checkbox ("☐ ", its first character) sits on its first row of text.
@@ -281,7 +335,7 @@ object NoteRows {
                 else gutter + under.textX + ((l.getPrimaryHorizontal(0) + l.getPrimaryHorizontal(1)) / 2).toInt()
             } ?: -1
             Row(
-                compress(bmp), under.block.line, under.block.task, spoken(pieces, top, top + strip),
+                { draw(top, sig) }, sig, under.block.line, under.block.task, spoken(here, top, top + strip),
                 fold?.block?.line ?: -1, fold?.block?.fold == Block.FOLDED,
                 if (under.block.task) sourceLines?.getOrNull(under.block.line)?.removeSuffix("\r") else null,
                 boxX,
@@ -400,6 +454,50 @@ object NoteRows {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, List<Row>>?) = size > 8
     }
 
+    // Blocks laid out, by what they show and how they look ([blockSig]): a long note's worth or so.
+    private val layouts = object : LinkedHashMap<Long, Piece>(256, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Long, Piece>?) = size > 3000
+    }
+
+    // Strips drawn, by what they show. Drawing goes one strip at a time under its lock, since the
+    // paints and laid-out blocks are shared.
+    private val drawn = object : LinkedHashMap<Long, ByteArray>(256, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Long, ByteArray>?) = size > 1500
+    }
+
+    /**
+     * What block [b] shows in [look], its styled text and kind, but not which line it's on: the
+     * same for a block that's laid out and drawn the same, wherever it moved to.
+     */
+    private fun blockSig(look: String, b: Block): Long {
+        val sb = StringBuilder(look).append('\u0001')
+        fun styled(t: CharSequence) {
+            sb.append(t).append('\u0002')
+            if (t !is android.text.Spanned) return
+            for (span in t.getSpans(0, t.length, Any::class.java)) {
+                sb.append(span.javaClass.name).append(',').append(t.getSpanStart(span)).append(',').append(t.getSpanEnd(span)).append(',')
+                sb.append(
+                    when (span) {
+                        is android.text.style.ForegroundColorSpan -> span.foregroundColor
+                        is android.text.style.BackgroundColorSpan -> span.backgroundColor
+                        is android.text.style.StyleSpan -> span.style
+                        is android.text.style.RelativeSizeSpan -> span.sizeChange
+                        is android.text.style.TypefaceSpan -> span.family
+                        is android.text.style.QuoteSpan -> span.color
+                        is android.text.style.LeadingMarginSpan -> "${span.getLeadingMargin(true)}/${span.getLeadingMargin(false)}"
+                        else -> ""
+                    },
+                ).append(';')
+            }
+        }
+        styled(b.text)
+        sb.append(b.task).append(b.code).append(b.rule).append(b.fold)
+        b.callout?.let { sb.append('c').append(it.color).append(it.icon).append(it.last) }
+        b.table?.let { t -> sb.append('t').append(t.align); t.rows.forEach { row -> row.forEach(::styled); sb.append('\u0003') } }
+        // 64 bits of SHA-1, so two different blocks don't share a layout by chance.
+        return java.nio.ByteBuffer.wrap(java.security.MessageDigest.getInstance("SHA-1").digest(sb.toString().toByteArray())).long
+    }
+
     private fun cacheKey(ctx: Context, cfg: WidgetConfig, text: String?, width: Int, dark: Boolean): String {
         val res = ctx.resources
         // The app's install time stands in for its version, since rendering changes with it.
@@ -425,6 +523,7 @@ object NoteRows {
                 DataInputStream(cacheFile(ctx, id, dark, note).inputStream().buffered()).use { input ->
                     if (input.readUTF() != key) return@use null
                     List(input.readInt()) {
+                        val sig = input.readLong()
                         val line = input.readInt()
                         val task = input.readBoolean()
                         val text = if (input.readBoolean()) input.readUTF() else null
@@ -432,14 +531,30 @@ object NoteRows {
                         val fold = input.readInt()
                         val folded = input.readBoolean()
                         val source = if (input.readBoolean()) input.readUTF() else null
-                        Row(image, line, task, text, fold, folded, source, input.readInt())
+                        Row({ image }, sig, line, task, text, fold, folded, source, input.readInt())
                     }
                 }
             }.getOrNull()?.also { memory["$id/$dark/$key"] = it }
     }
 
-    private fun save(ctx: Context, id: Int, dark: Boolean, key: String, note: String, rows: List<Row>) = synchronized(memory) {
-        memory["$id/$dark/$key"] = rows
+    /**
+     * Keeps [rows] in memory, and on disk too for notes up to [DISK_ROWS] rows. That's behind the
+     * scenes, since it draws every strip: a longer note's are only drawn as they're shown, and
+     * drawing them all just to keep them would undo that.
+     */
+    private fun save(ctx: Context, id: Int, dark: Boolean, key: String, note: String, rows: List<Row>) {
+        synchronized(memory) { memory["$id/$dark/$key"] = rows }
+        if (rows.size > DISK_ROWS) return
+        val app = ctx.applicationContext
+        kotlin.concurrent.thread {
+            rows.forEach { it.image }
+            synchronized(memory) { persist(app, id, dark, key, note, rows) }
+        }
+    }
+
+    private const val DISK_ROWS = 300
+
+    private fun persist(ctx: Context, id: Int, dark: Boolean, key: String, note: String, rows: List<Row>) {
         runCatching {
             val file = cacheFile(ctx, id, dark, note)
             val tmp = File(file.path + ".tmp")
@@ -447,6 +562,7 @@ object NoteRows {
                 out.writeUTF(key)
                 out.writeInt(rows.size)
                 for (r in rows) {
+                    out.writeLong(r.sig)
                     out.writeInt(r.line)
                     out.writeBoolean(r.task)
                     out.writeBoolean(r.text != null)
@@ -462,9 +578,9 @@ object NoteRows {
                 }
             }
             tmp.renameTo(file)
-            // Kept for the last few notes shown (two notes, light and dark), not every note ever picked.
+            // Kept for the notes the widget swaps between, light and dark, not every note ever picked.
             ctx.cacheDir.listFiles { f -> f.name.startsWith("rows-$id-") }
-                ?.sortedByDescending { it.lastModified() }?.drop(4)?.forEach { it.delete() }
+                ?.sortedByDescending { it.lastModified() }?.drop(2 * WidgetConfig.MAX_SWAP)?.forEach { it.delete() }
         }
     }
 
@@ -529,7 +645,7 @@ object NoteRows {
         val seen = HashMap<Int, Int>()
         return LongArray(rows.size) { i ->
             val r = rows[i]
-            val hash = 31 * r.image.contentHashCode() + r.fold * 2 + (if (r.folded) 1 else 0)
+            val hash = (r.sig * 31 + r.fold * 2 + (if (r.folded) 1 else 0)).let { (it xor (it ushr 32)).toInt() }
             val n = seen.merge(hash, 1, Int::plus)!!
             (hash.toLong() shl 20) xor n.toLong()
         }
@@ -576,7 +692,7 @@ object NoteRows {
 
     /** Compressed strips by their pixels, for [compress]. */
     private val strips = object : LinkedHashMap<Long, ByteArray>(256, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Long, ByteArray>?) = size > 1500
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Long, ByteArray>?) = size > 500
     }
 
     private fun dp(ctx: Context, v: Int) = (v * ctx.resources.displayMetrics.density).toInt()
