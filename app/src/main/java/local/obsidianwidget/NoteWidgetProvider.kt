@@ -261,8 +261,8 @@ class NoteWidgetProvider : AppWidgetProvider() {
             views.setOnClickPendingIntent(
                 R.id.title,
                 if (cfg.swaps) activity(ctx, id, 8, tapIntent(ctx, id, "swap").putExtra(TapActivity.EXTRA_SWAP, true))
-                // Swapping on, but nothing to swap with yet: pick a note to add.
-                else activity(ctx, id, 3, tapIntent(ctx, id, "pick").putExtra(TapActivity.EXTRA_FORWARD, configIntent(ctx, id, pickOnly = true, pickAlt = cfg.switchNotes))),
+                // Only the one note: pick another in its place.
+                else activity(ctx, id, 3, tapIntent(ctx, id, "pick").putExtra(TapActivity.EXTRA_FORWARD, configIntent(ctx, id, pickOnly = true))),
             )
             views.setOnClickPendingIntent(R.id.btn_settings, activity(ctx, id, 4, tapIntent(ctx, id, "settings").putExtra(TapActivity.EXTRA_FORWARD, configIntent(ctx, id, pickOnly = false))))
             views.setOnClickPendingIntent(
@@ -338,11 +338,10 @@ class NoteWidgetProvider : AppWidgetProvider() {
             .setData(Uri.parse("widget://$id/edit"))
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
 
-        fun configIntent(ctx: Context, id: Int, pickOnly: Boolean, pickAlt: Boolean = false) = Intent(ctx, ConfigActivity::class.java)
+        fun configIntent(ctx: Context, id: Int, pickOnly: Boolean) = Intent(ctx, ConfigActivity::class.java)
             .putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, id)
             .putExtra(ConfigActivity.EXTRA_PICK_ONLY, pickOnly)
-            .putExtra(ConfigActivity.EXTRA_PICK_ALT, pickAlt)
-            .setData(Uri.parse("widget://$id/config/$pickOnly/$pickAlt"))
+            .setData(Uri.parse("widget://$id/config/$pickOnly"))
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
 
         private fun activity(ctx: Context, id: Int, slot: Int, intent: Intent) = PendingIntent.getActivity(

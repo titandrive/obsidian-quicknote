@@ -63,24 +63,33 @@ object NoteRows {
 
     /**
      * How big widget [id]'s rows are with nothing folded, which decides how they reach the
-     * launcher, so folding never switches that. Remembered per note, so a fold doesn't draw the
-     * whole note again just to measure it.
+     * launcher, so folding never switches that. With notes to swap between it's the biggest of
+     * them, so swapping never switches it either: a switch has the launcher rebuild the whole list,
+     * which hitched quick taps through the notes.
      */
     fun wholeSize(ctx: Context, id: Int): Int {
         val cfg = WidgetStore.load(ctx, id) ?: return Int.MAX_VALUE
+        val notes = if (cfg.swaps) cfg.swapNotes.map { cfg.copy(noteUri = it.uri, notePath = it.path) } else listOf(cfg)
+        return notes.maxOf { noteSize(ctx, id, it) }
+    }
+
+    /** How big [cfg]'s note is drawn whole in widget [id]; remembered per note, so a fold doesn't draw it again just to measure it. */
+    private fun noteSize(ctx: Context, id: Int, cfg: WidgetConfig): Int {
         val text = Vault.read(ctx, cfg.uri)
         val width = (TextBitmaps.widgetWidth(ctx, id) - dp(ctx, 14 + 6 + 8)).coerceAtLeast(1)
         val key = cacheKey(ctx, cfg, text, width, false)
+        val slot = "$id-${cfg.noteUri.hashCode().toUInt()}"
         val memo = ctx.getSharedPreferences("routes", Context.MODE_PRIVATE)
-        if (memo.getString("sizeKey$id", null) == key) return memo.getInt("size$id", Int.MAX_VALUE)
-        val whole = build(ctx, id, true, text) ?: return Int.MAX_VALUE
+        if (memo.getString("sizeKey$slot", null) == key) return memo.getInt("size$slot", Int.MAX_VALUE)
+        val whole = build(ctx, id, true, text, cfg) ?: return Int.MAX_VALUE
         val size = whole.rows.sumOf { it.image.size } + whole.night.orEmpty().sumOf { it.image.size }
-        memo.edit().putString("sizeKey$id", key).putInt("size$id", size).apply()
+        memo.edit().putString("sizeKey$slot", key).putInt("size$slot", size).apply()
         return size
     }
 
-    private fun build(ctx: Context, id: Int, unfolded: Boolean, known: String?): Built? {
-        val cfg = WidgetStore.load(ctx, id) ?: return null
+    /** Widget [id]'s rows, for its note or the one in [given]. */
+    private fun build(ctx: Context, id: Int, unfolded: Boolean, known: String?, given: WidgetConfig? = null): Built? {
+        val cfg = given ?: WidgetStore.load(ctx, id) ?: return null
         val text = known ?: Vault.read(ctx, cfg.uri)
         // The list's width: the widget minus its side padding.
         val width = (TextBitmaps.widgetWidth(ctx, id) - dp(ctx, 14 + 6 + 8)).coerceAtLeast(1)

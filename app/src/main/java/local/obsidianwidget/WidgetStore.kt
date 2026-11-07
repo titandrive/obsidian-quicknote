@@ -31,14 +31,13 @@ data class WidgetConfig(
     val showSourceButton: Boolean = true,
     val sourceMode: Boolean = false,
     /**
-     * Swapping notes: tapping the note's name shows the next of [swapNotes] (up to [MAX_SWAP], in
-     * order, the shown one among them) instead of picking one.
+     * The widget's notes, up to [MAX_SWAP], the shown one among them. With more than one, tapping
+     * the note's name shows the next, in order, instead of picking one.
      */
-    val switchNotes: Boolean = false,
     val swapNotes: List<SwapNote> = emptyList(),
 ) {
     /** Whether tapping the note's name swaps notes. */
-    val swaps: Boolean get() = switchNotes && swapNotes.size >= 2
+    val swaps: Boolean get() = swapNotes.size >= 2
 
     /** The note after the shown one in [swapNotes], round to the first again. */
     fun next(): SwapNote {
@@ -83,8 +82,7 @@ data class WidgetConfig(
         .put("vault", vault).put("vaultName", vaultName).put("checkMinutes", checkMinutes).put("showToolbar", showToolbar)
         .put("readOnly", readOnly).put("showSettings", showSettings)
         .put("showSourceButton", showSourceButton).put("sourceMode", sourceMode)
-        .put("switchNotes", switchNotes)
-        .put("swapNotes", org.json.JSONArray().apply { swapNotes.forEach { put(JSONObject().put("uri", it.uri).put("path", it.path)) } })
+        .put("notes", org.json.JSONArray().apply { swapNotes.forEach { put(JSONObject().put("uri", it.uri).put("path", it.path)) } })
         .apply {
             colors?.let {
                 put("dark", it.dark.toJson()).put("light", it.light.toJson()).put("vaultMode", it.vaultMode).put("vaultFont", it.font)
@@ -94,12 +92,16 @@ data class WidgetConfig(
     companion object {
         const val MAX_SWAP = 5
 
-        /** The notes to swap between; saved before there could be more than two, it's the note and its other one. */
+        /**
+         * The widget's notes. Saved while swapping was a switch of its own, they're the ones it
+         * swapped between if it was on; before that, the note and its other one.
+         */
         private fun swapNotes(o: JSONObject): List<SwapNote> {
-            o.optJSONArray("swapNotes")?.let { a ->
+            val list = o.optJSONArray("notes") ?: o.optJSONArray("swapNotes")?.takeIf { o.optBoolean("switchNotes") }
+            list?.let { a ->
                 return (0 until a.length()).map { a.getJSONObject(it) }.map { SwapNote(it.getString("uri"), it.getString("path")) }
             }
-            val alt = o.optString("altNoteUri")
+            val alt = o.optString("altNoteUri").takeIf { o.optBoolean("switchNotes") }.orEmpty()
             return if (alt.isEmpty()) emptyList()
             else listOf(SwapNote(o.getString("noteUri"), o.getString("notePath")), SwapNote(alt, o.optString("altNotePath")))
         }
@@ -116,7 +118,7 @@ data class WidgetConfig(
             o.optInt("checkMinutes", 30), o.optBoolean("showToolbar", true), o.optBoolean("readOnly", false),
             o.optBoolean("showSettings", true),
             o.optBoolean("showSourceButton", true), o.optBoolean("sourceMode", false),
-            o.optBoolean("switchNotes", false), swapNotes(o),
+            swapNotes(o),
         )
     }
 }

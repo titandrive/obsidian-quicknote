@@ -86,7 +86,6 @@ class ConfigActivity : ComponentActivity() {
         /** Opened by tapping the widget's note name: just the note list, saved on tap. */
         const val EXTRA_PICK_ONLY = "pick_only"
         /** With [EXTRA_PICK_ONLY]: pick the note to swap with, rather than the widget's note. */
-        const val EXTRA_PICK_ALT = "pick_alt"
 
         private val MODES = listOf("vault", "system", "light", "dark")
     }
@@ -102,10 +101,9 @@ class ConfigActivity : ComponentActivity() {
 
         val existing = WidgetStore.load(this, widgetId)
         val pickOnly = intent.getBooleanExtra(EXTRA_PICK_ONLY, false) && existing != null
-        val pickAlt = pickOnly && intent.getBooleanExtra(EXTRA_PICK_ALT, false)
         enableEdgeToEdge()
         // A new widget starts with the settings of the one removed last, so replacing a widget is quick.
-        setContent { Screen(existing ?: WidgetStore.lastRemoved(this), pickOnly && !pickAlt, pickAlt) }
+        setContent { Screen(existing ?: WidgetStore.lastRemoved(this), pickOnly) }
     }
 
     private suspend fun save(cfg: WidgetConfig) {
@@ -121,7 +119,7 @@ class ConfigActivity : ComponentActivity() {
     }
 
     @Composable
-    private fun Screen(existing: WidgetConfig?, pickOnly: Boolean, pickAltOnly: Boolean = false) {
+    private fun Screen(existing: WidgetConfig?, pickOnly: Boolean) {
         val scope = rememberCoroutineScope()
         // This widget's vault; a new widget starts with the app's default one.
         var vault by remember { mutableStateOf(existing?.vault?.takeIf { it.isNotEmpty() } ?: Vault.defaultTree(this)?.toString()) }
@@ -132,7 +130,10 @@ class ConfigActivity : ComponentActivity() {
         // Each theme's colours, filled in as they're worked out, for the swatches in the theme sheet.
         val swatches = remember { mutableStateMapOf<String, ThemeColors>() }
 
-        var notePath by remember { mutableStateOf(existing?.notePath) }
+        // The widget's notes, and which of them it shows.
+        var swapNotes by remember {
+            mutableStateOf(existing?.swapNotes?.ifEmpty { null } ?: listOfNotNull(existing?.takeIf { it.noteUri.isNotEmpty() }?.let { SwapNote(it.noteUri, it.notePath) }))
+        }
         var noteUri by remember { mutableStateOf(existing?.noteUri) }
         var theme by remember { mutableStateOf(existing?.theme ?: ObsidianTheme.THEME_VAULT) }
         var mode by remember { mutableStateOf(existing?.mode ?: "vault") }
@@ -144,11 +145,8 @@ class ConfigActivity : ComponentActivity() {
         var checkMinutes by remember { mutableIntStateOf(existing?.checkMinutes ?: 30) }
         var colors by remember { mutableStateOf(existing?.colors) }
         var noteText by remember { mutableStateOf<String?>(null) }
-        var picking by remember { mutableStateOf(pickOnly) }
-        var switchNotes by remember { mutableStateOf(existing?.switchNotes ?: false) }
-        var swapNotes by remember { mutableStateOf(existing?.swapNotes.orEmpty()) }
-        // Picking a note to swap between: which one it replaces, or -1 to add one.
-        var pickingSwap by remember { mutableStateOf(if (pickAltOnly) -1 else null) }
+        // Picking a note: which one it replaces, or -1 to add one. From the widget, it's the one shown.
+        var picking by remember { mutableStateOf(if (pickOnly) swapNotes.indexOfFirst { it.uri == noteUri } else null) }
         var pickingTheme by remember { mutableStateOf(false) }
         var previewBounds by remember { mutableStateOf<Rect?>(null) }
 
@@ -164,7 +162,6 @@ class ConfigActivity : ComponentActivity() {
                 if (Vault.defaultTree(this) == null) Vault.setDefault(this, uri, name)
                 vault = uri.toString()
                 vaultName = name
-                notePath = null
                 noteUri = null
                 swapNotes = emptyList()
                 swatches.clear()
@@ -179,7 +176,7 @@ class ConfigActivity : ComponentActivity() {
                 vaultTheme = Vault.appearance(this@ConfigActivity, tree)?.optString("cssTheme").orEmpty()
                 notes = Vault.notes(this@ConfigActivity, tree).sortedByDescending { it.modified }
             }
-            if (notePath == null) picking = true
+            if (swapNotes.isEmpty()) picking = -1
         }
         LaunchedEffect(theme, vault) {
             val tree = vault?.let(Uri::parse) ?: return@LaunchedEffect
@@ -194,50 +191,38 @@ class ConfigActivity : ComponentActivity() {
                 if (t !in swatches) swatches[t] = withContext(Dispatchers.IO) { ObsidianTheme.load(this@ConfigActivity, tree, t) }
             }
         }
-        LaunchedEffect(noteUri) {
-            noteText = noteUri?.let { u -> withContext(Dispatchers.IO) { Vault.read(this@ConfigActivity, android.net.Uri.parse(u)) } }
+        fun shown() = swapNotes.firstOrNull { it.uri == noteUri } ?: swapNotes.firstOrNull()
+        LaunchedEffect(shown()?.uri) {
+            noteText = shown()?.uri?.let { u -> withContext(Dispatchers.IO) { Vault.read(this@ConfigActivity, android.net.Uri.parse(u)) } }
         }
 
-        // While swapping, the note shown is always one of those swapped between.
-        fun shown() = swapNotes.takeIf { switchNotes }?.let { list -> list.firstOrNull { it.uri == noteUri } ?: list.firstOrNull() }
         fun current() = WidgetConfig(
-            noteUri = shown()?.uri ?: noteUri.orEmpty(), notePath = shown()?.path ?: notePath.orEmpty(), theme = theme, mode = mode,
+            noteUri = shown()?.uri.orEmpty(), notePath = shown()?.path.orEmpty(), theme = theme, mode = mode,
             opacity = opacity, textSize = textSize, colors = colors, showHeader = showHeader,
             vault = vault.orEmpty(), vaultName = vaultName.orEmpty(), checkMinutes = checkMinutes,
             showToolbar = existing?.showToolbar ?: true,
             readOnly = existing?.readOnly ?: false, showSettings = showSettings,
             showSourceButton = showSourceButton, sourceMode = (existing?.sourceMode ?: false) && showSourceButton,
-            switchNotes = switchNotes, swapNotes = swapNotes,
+            swapNotes = swapNotes,
         )
         val cfg = current()
 
         // The screen wears the widget's own theme and font, so changes show on it as they're made.
         AppTheme(palette = colors?.let { cfg.palette(this) }, font = remember(cfg.fontFile) { Fonts.compose(cfg.fontFile) }) {
-            if (picking) {
-                BackHandler { if (pickOnly) finish() else picking = false }
-                NotePicker(notes, noteUri, onBack = { if (pickOnly) finish() else picking = false }) { note ->
-                    notePath = note.path
-                    noteUri = note.uri.toString()
-                    // Picked from the widget: stay on the picker while saving, rather than flash the settings.
-                    if (pickOnly) scope.launch { save(current()) } else picking = false
-                }
-                return@AppTheme
-            }
-            pickingSwap?.let { at ->
-                val done = { if (pickAltOnly) finish() else pickingSwap = null }
+            picking?.let { at ->
+                val done = { if (pickOnly) finish() else picking = null }
                 BackHandler { done() }
-                NotePicker(notes, swapNotes.getOrNull(at)?.uri, onBack = done, title = if (at < 0) "Add a note to swap" else "Choose a note to swap") { note ->
+                NotePicker(notes, swapNotes.getOrNull(at)?.uri, onBack = done, title = if (at < 0 && swapNotes.isNotEmpty()) "Add a note" else "Choose a note") { note ->
                     val picked = SwapNote(note.uri.toString(), note.path)
-                    // The note shown is always among them, first if the list was empty.
-                    if (swapNotes.isEmpty()) swapNotes = listOfNotNull(noteUri?.let { SwapNote(it, notePath.orEmpty()) })
+                    val was = swapNotes.getOrNull(at)
                     // A note already in the list stays where it is.
                     if (swapNotes.none { it.uri == picked.uri }) {
-                        val was = swapNotes.getOrNull(at)
-                        swapNotes = if (at < 0) swapNotes + picked else swapNotes.toMutableList().apply { set(at, picked) }
-                        // Replacing the note shown shows the new one instead.
-                        if (was != null && was.uri == noteUri) { noteUri = picked.uri; notePath = picked.path }
+                        swapNotes = if (was == null) swapNotes + picked else swapNotes.toMutableList().apply { set(at, picked) }
                     }
-                    if (pickAltOnly) scope.launch { save(current()) } else pickingSwap = null
+                    // Picking in place of the note shown, or the first note, shows the one picked.
+                    if (was == null && swapNotes.size == 1 || was != null && was.uri == shown()?.uri) noteUri = picked.uri
+                    // Picked from the widget: stay on the picker while saving, rather than flash the settings.
+                    if (pickOnly) scope.launch { save(current()) } else picking = null
                 }
                 return@AppTheme
             }
@@ -278,7 +263,7 @@ class ConfigActivity : ComponentActivity() {
                             val tick = rememberHaptic()
                             Button(
                                 onClick = { tick(); scope.launch { save(current()) } },
-                                enabled = notePath != null && colors != null,
+                                enabled = swapNotes.isNotEmpty() && colors != null,
                                 shape = CircleShape,
                                 colors = ButtonDefaults.buttonColors(
                                     disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
@@ -315,7 +300,6 @@ class ConfigActivity : ComponentActivity() {
                         Preview(cfg, noteText) { previewBounds = it }
 
                         SectionCard("Note", R.drawable.ic_note) {
-                            val primary = MaterialTheme.colorScheme.primary
                             // The vault first, since it's picked first.
                             NavRow(
                                 title = vault?.let { Vault.displayPath(Uri.parse(it)) } ?: vaultName!!,
@@ -324,37 +308,13 @@ class ConfigActivity : ComponentActivity() {
                                 onClick = { pickVault.launch(null) },
                             )
                             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                            // While swapping, the list below has the notes instead.
-                            if (!switchNotes) NavRow(
-                                title = notePath?.substringAfterLast('/')?.removeSuffix(".md") ?: "Choose a note",
-                                subtitle = null,
-                                onClick = { picking = true },
+                            // More than one note, and the widget's title swaps between them.
+                            SwapList(
+                                swapNotes, shown = shown()?.uri,
+                                onMove = { from, to -> swapNotes = swapNotes.toMutableList().apply { add(to, removeAt(from)) } },
+                                onRemove = { i -> swapNotes = swapNotes.toMutableList().apply { removeAt(i) } },
+                                onPick = { i -> picking = i },
                             )
-                            SwitchRow("Swap notes", "Tap the note's title to swap through up to ${WidgetConfig.MAX_SWAP} notes in order", switchNotes) {
-                                switchNotes = it
-                                // Starting with the note shown, and straight on to picking the next.
-                                if (it && swapNotes.isEmpty()) {
-                                    swapNotes = listOfNotNull(noteUri?.let { u -> SwapNote(u, notePath.orEmpty()) })
-                                    pickingSwap = -1
-                                }
-                            }
-                            // The notes to swap between, set in under the switch so they read as part of it.
-                            if (switchNotes) Box(
-                                Modifier
-                                    .padding(start = 12.dp)
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-                                    .drawBehind { drawRect(primary, size = androidx.compose.ui.geometry.Size(3.dp.toPx(), size.height)) }
-                                    .padding(start = 14.dp, end = 4.dp),
-                            ) {
-                                SwapList(
-                                    swapNotes, shown = shown()?.uri,
-                                    onMove = { from, to -> swapNotes = swapNotes.toMutableList().apply { add(to, removeAt(from)) } },
-                                    onRemove = { i -> swapNotes = swapNotes.toMutableList().apply { removeAt(i) } },
-                                    onPick = { i -> pickingSwap = i },
-                                )
-                            }
                         }
 
                         SectionCard("Appearance", R.drawable.ic_palette) {
@@ -469,8 +429,9 @@ class ConfigActivity : ComponentActivity() {
     }
 
     /**
-     * The notes the widget swaps between, in the order it shows them: each moved by dragging its
-     * handle, changed by tapping it, or removed; and a row to add another, up to [WidgetConfig.MAX_SWAP].
+     * The widget's notes, in the order its title swaps through them: each changed by tapping it,
+     * and with more than one, moved by dragging its handle or removed; and a row to add another,
+     * up to [WidgetConfig.MAX_SWAP].
      */
     @Composable
     private fun SwapList(notes: List<SwapNote>, shown: String?, onMove: (Int, Int) -> Unit, onRemove: (Int) -> Unit, onPick: (Int) -> Unit) {
@@ -499,7 +460,8 @@ class ConfigActivity : ComponentActivity() {
                             .clickable { tick(); onPick(i) }
                             .padding(vertical = 4.dp),
                     ) {
-                        Icon(
+                        // A lone note has nothing to change places with.
+                        if (notes.size > 1) Icon(
                             painterResource(R.drawable.ic_grip), "Drag to reorder", tint = muted,
                             modifier = Modifier
                                 .size(40.dp)
@@ -523,13 +485,13 @@ class ConfigActivity : ComponentActivity() {
                         )
                         Column(Modifier.weight(1f).padding(horizontal = 4.dp)) {
                             Text(note.title, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            if (note.uri == shown) Text("Showing now", style = MaterialTheme.typography.bodySmall, color = noteColor())
+                            if (notes.size > 1 && note.uri == shown) Text("Showing now", style = MaterialTheme.typography.bodySmall, color = noteColor())
                         }
-                        // One note is always left, as the one shown.
+                        // One note is always left, as the one shown; it changes with a tap instead.
                         if (notes.size > 1) Icon(
                             painterResource(R.drawable.ic_close), "Remove", tint = muted,
                             modifier = Modifier.size(40.dp).clip(CircleShape).clickable { tick(); onRemove(i) }.padding(10.dp),
-                        )
+                        ) else Icon(painterResource(R.drawable.ic_chevron_right), null, tint = muted, modifier = Modifier.padding(10.dp).size(20.dp))
                     }
                 }
             }
@@ -542,7 +504,10 @@ class ConfigActivity : ComponentActivity() {
                     .padding(vertical = 4.dp),
             ) {
                 Icon(painterResource(R.drawable.ic_plus), null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(40.dp).padding(10.dp))
-                Text("Add a note", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(horizontal = 4.dp))
+                Column(Modifier.padding(horizontal = 4.dp)) {
+                    Text(if (notes.isEmpty()) "Choose a note" else "Add a note", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.primary)
+                    if (notes.size == 1) Text("Tap the widget's title to swap between notes", style = MaterialTheme.typography.bodySmall, color = noteColor())
+                }
             }
         }
     }
