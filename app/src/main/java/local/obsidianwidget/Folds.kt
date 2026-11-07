@@ -186,18 +186,39 @@ object Folds {
         companion object {
             private val PLUGINS = listOf("live-fold-sync", "sync-folds")
 
-            // Where each vault's plugin data is, so a fold doesn't walk the vault's folders again.
+            // Where each vault's plugin data is, and when that was looked up, so a fold doesn't walk
+            // the vault's folders again: that takes seconds.
             private val found = HashMap<String, Pair<Long, Uri?>>()
 
-            /** Widget [id]'s note's shared folds, or null when no fold-syncing plugin is on. */
+            /**
+             * Widget [id]'s note's shared folds, or null when no fold-syncing plugin is on. Only the
+             * first look ever waits for the walk; the answer is kept on disk too, since the app's
+             * process often doesn't last. After a minute it's looked up again behind the scenes, in
+             * case the plugin was turned on or off, and the last answer serves till then.
+             */
             fun of(ctx: Context, id: Int): Shared? {
                 val cfg = WidgetStore.load(ctx, id) ?: return null
                 val tree = cfg.vaultTree
+                val key = tree.toString()
                 val now = android.os.SystemClock.uptimeMillis()
-                val data = synchronized(found) {
-                    found[tree.toString()]?.takeIf { now - it.first < 60_000 }?.second
-                        ?: locate(ctx, tree).also { found[tree.toString()] = now to it }
-                } ?: return null
+                val disk = ctx.getSharedPreferences("folds", Context.MODE_PRIVATE)
+                fun keep(uri: Uri?) {
+                    synchronized(found) { found[key] = android.os.SystemClock.uptimeMillis() to uri }
+                    disk.edit().putString("data@$key", uri?.toString().orEmpty()).apply()
+                }
+                val known = synchronized(found) {
+                    // From disk, it's as good as a minute old: looked up again, but not waited for.
+                    (found[key] ?: disk.getString("data@$key", null)?.let { (now - 60_000) to it.ifEmpty { null }?.let(Uri::parse) })?.also { (at, uri) ->
+                        // Marked as looked up now, so only one look runs at a time.
+                        if (now - at >= 60_000) {
+                            found[key] = now to uri
+                            val app = ctx.applicationContext
+                            kotlin.concurrent.thread { keep(locate(app, tree)) }
+                        }
+                    }
+                }
+                val data = (if (known != null) known.second else locate(ctx, tree).also(::keep))
+                    ?: return null
                 return Shared(data, cfg.notePath)
             }
 
