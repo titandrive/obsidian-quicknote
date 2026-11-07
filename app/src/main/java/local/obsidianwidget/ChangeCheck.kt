@@ -107,7 +107,7 @@ object ChangeCheck {
             cfg = cfg.copy(colors = colors)
             WidgetStore.save(ctx, id, cfg)
         }
-        if (themeChanged || stamp(ctx, cfg) != prefs(ctx).getString("seen$id", null)) {
+        if (themeChanged || stamp(ctx, id, cfg) != prefs(ctx).getString("seen$id", null)) {
             NoteWidgetProvider.update(ctx, AppWidgetManager.getInstance(ctx), id)
         }
     }
@@ -116,19 +116,24 @@ object ChangeCheck {
      * What a widget was last drawn from, as far as the check can tell: the note's date and size,
      * and light or dark unless the launcher switches that by itself.
      */
-    private fun stamp(ctx: Context, cfg: WidgetConfig): String {
-        val note = runCatching {
-            ctx.contentResolver.query(cfg.uri, arrayOf(Document.COLUMN_LAST_MODIFIED, Document.COLUMN_SIZE), null, null, null)
+    private fun stamp(ctx: Context, id: Int, cfg: WidgetConfig): String {
+        fun dated(uri: android.net.Uri) = runCatching {
+            ctx.contentResolver.query(uri, arrayOf(Document.COLUMN_LAST_MODIFIED, Document.COLUMN_SIZE), null, null, null)
                 ?.use { if (it.moveToFirst()) "${it.getLong(0)}:${it.getLong(1)}" else null }
-        }.getOrNull() ?: "missing"
-        // Folds changed in Obsidian, when a plugin shares them.
-        val folds = runCatching { Folds.Shared.watched(ctx, cfg.vaultTree)?.let { ":" + Vault.stamp(ctx, cfg.vaultTree, listOf(it)) } }.getOrNull().orEmpty()
+        }.getOrNull()
+        val note = dated(cfg.uri) ?: "missing"
+        // Folds changed in Obsidian, when a plugin shares them; its file is already found, not looked for.
+        val folds = Folds.Shared.of(ctx, id)?.data?.let { ":" + dated(it) }.orEmpty()
         val file = note + folds
         return if (NoteRows.dayAndNight(cfg)) file else "$file:${cfg.isDark(ctx)}"
     }
 
-    /** Records what the widget was just drawn from, so the next check can tell if it changed. */
+    /**
+     * Records what the widget was just drawn from, so the next check can tell if it changed.
+     * Behind the scenes, so a redraw never waits on the storage provider for it.
+     */
     fun drawn(ctx: Context, id: Int, cfg: WidgetConfig) {
-        prefs(ctx).edit().putString("seen$id", stamp(ctx, cfg)).apply()
+        val app = ctx.applicationContext
+        kotlin.concurrent.thread { prefs(app).edit().putString("seen$id", stamp(app, id, cfg)).apply() }
     }
 }

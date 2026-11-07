@@ -167,11 +167,40 @@ object Vault {
 
     fun read(ctx: Context, uri: Uri): String? = runCatching {
         ctx.contentResolver.openInputStream(uri)?.use { it.readBytes().decodeToString() }
-    }.getOrNull()
+    }.getOrNull()?.also { synchronized(texts) { texts[uri.toString()] = it } }
 
     fun write(ctx: Context, uri: Uri, text: String) {
         // "wt" truncates; plain "w" leaves stale bytes behind when the note gets shorter.
         ctx.contentResolver.openOutputStream(uri, "wt")!!.use { it.write(text.encodeToByteArray()) }
+        synchronized(texts) { texts[uri.toString()] = text }
+    }
+
+    // What each file held when last read or written here, and the files being read again now.
+    private val texts = HashMap<String, String>()
+    private val reading = HashSet<String>()
+
+    /**
+     * [uri]'s text as last read, without waiting to open it again: now and then the storage
+     * provider takes seconds to open a file, which held up the widget while it was tapped through.
+     * It's read again behind the scenes, and if it changed, [onChanged] is told. A file not read
+     * yet is read now.
+     */
+    fun recent(ctx: Context, uri: Uri, onChanged: (() -> Unit)? = null): String? {
+        val key = uri.toString()
+        val known = synchronized(texts) { texts[key] } ?: return read(ctx, uri)
+        if (synchronized(texts) { reading.add(key) }) {
+            val app = ctx.applicationContext
+            kotlin.concurrent.thread {
+                val now = try {
+                    runCatching { app.contentResolver.openInputStream(uri)?.use { it.readBytes().decodeToString() } }.getOrNull()
+                } finally {
+                    synchronized(texts) { reading.remove(key) }
+                }
+                val changed = now != null && synchronized(texts) { (texts.put(key, now) != now) }
+                if (changed) onChanged?.invoke()
+            }
+        }
+        return known
     }
 
     /** obsidian:// link that opens [path] in the vault called [vaultName]. */

@@ -75,7 +75,7 @@ object NoteRows {
 
     /** How big [cfg]'s note is drawn whole in widget [id]; remembered per note, so a fold doesn't draw it again just to measure it. */
     private fun noteSize(ctx: Context, id: Int, cfg: WidgetConfig): Int {
-        val text = Vault.read(ctx, cfg.uri)
+        val text = Vault.recent(ctx, cfg.uri)
         val width = (TextBitmaps.widgetWidth(ctx, id) - dp(ctx, 14 + 6 + 8)).coerceAtLeast(1)
         val key = cacheKey(ctx, cfg, text, width, false)
         val slot = "$id-${cfg.noteUri.hashCode().toUInt()}"
@@ -90,7 +90,8 @@ object NoteRows {
     /** Widget [id]'s rows, for its note or the one in [given]. */
     private fun build(ctx: Context, id: Int, unfolded: Boolean, known: String?, given: WidgetConfig? = null): Built? {
         val cfg = given ?: WidgetStore.load(ctx, id) ?: return null
-        val text = known ?: Vault.read(ctx, cfg.uri)
+        // As last read, so a slow storage provider never holds up the widget; changed, it's redrawn.
+        val text = known ?: Vault.recent(ctx, cfg.uri) { NoteWidgetProvider.update(ctx.applicationContext, AppWidgetManager.getInstance(ctx), id) }
         // The list's width: the widget minus its side padding.
         val width = (TextBitmaps.widgetWidth(ctx, id) - dp(ctx, 14 + 6 + 8)).coerceAtLeast(1)
         val regions = text?.let(Folds::regions).orEmpty()

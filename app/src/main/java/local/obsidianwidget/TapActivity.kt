@@ -38,7 +38,7 @@ class TapActivity : Activity() {
                 val app = applicationContext
                 thread {
                     val cfg = WidgetStore.load(app, id) ?: return@thread
-                    val text = Vault.read(app, cfg.uri) ?: return@thread
+                    val text = Vault.recent(app, cfg.uri) ?: return@thread
                     Folds.toggle(app, id, text, fold)
                     NoteWidgetProvider.update(app, android.appwidget.AppWidgetManager.getInstance(app), id)
                 }

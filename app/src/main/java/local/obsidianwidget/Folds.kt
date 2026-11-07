@@ -142,7 +142,7 @@ object Folds {
      * `{"folds": "<JSON of {path: {folds: [{from, to}], lines}}>"}`, lines counted from 0, as
      * Obsidian keeps them.
      */
-    class Shared(private val data: Uri, private val path: String) {
+    class Shared(val data: Uri, private val path: String, private val id: Int) {
         /** The folded lines, or null if they were saved for another version of the note. */
         fun read(ctx: Context, text: String): Set<Int>? {
             val info = all(ctx)?.optJSONObject(path) ?: return emptySet()
@@ -172,7 +172,8 @@ object Folds {
             }
         }
 
-        private fun all(ctx: Context): JSONObject? = Vault.read(ctx, data)
+        // As last read, like the note; folds changed in Obsidian redraw the widget once they're in.
+        private fun all(ctx: Context): JSONObject? = Vault.recent(ctx, data) { NoteWidgetProvider.update(ctx.applicationContext, android.appwidget.AppWidgetManager.getInstance(ctx), id) }
             ?.let { runCatching { JSONObject(JSONObject(it).optString("folds", "{}")) }.getOrNull() }
 
         /** Where Obsidian ends a fold: a heading's takes the blank lines before the next heading. */
@@ -219,7 +220,7 @@ object Folds {
                 }
                 val data = (if (known != null) known.second else locate(ctx, tree).also(::keep))
                     ?: return null
-                return Shared(data, cfg.notePath)
+                return Shared(data, cfg.notePath, id)
             }
 
             private fun locate(ctx: Context, tree: Uri): Uri? {
@@ -228,12 +229,6 @@ object Folds {
                     ?.let { a -> List(a.length()) { a.optString(it) } }.orEmpty()
                 val plugin = PLUGINS.firstOrNull { it in enabled } ?: return null
                 return Vault.find(ctx, tree, ".obsidian/plugins/$plugin/data.json")
-            }
-
-            /** The data file to watch for folds changed in Obsidian, from the vault root. */
-            fun watched(ctx: Context, tree: Uri): String? {
-                val enabled = Vault.readPath(ctx, tree, ".obsidian/community-plugins.json") ?: return null
-                return PLUGINS.firstOrNull { enabled.contains("\"$it\"") }?.let { ".obsidian/plugins/$it/data.json" }
             }
         }
     }
