@@ -37,6 +37,11 @@ object NoteRows {
         val source: String? = null,
         /** For a strip beside a task's checkbox, the box's middle, in px across the strip; else -1. */
         val boxX: Int = -1,
+        /**
+         * A Task Resetter button in this strip: its kind ([Block.RESET_SECTION] or [Block.RESET_ALL],
+         * else 0), the note line it's on, and where it's drawn (left edge and width, in px); else -1.
+         */
+        val reset: Int = 0, val resetLine: Int = -1, val resetX: Int = -1, val resetW: Int = -1,
     ) {
         val image: ByteArray by lazy(draw)
     }
@@ -334,11 +339,31 @@ object NoteRows {
                 if (rowBottom <= top || rowTop >= top + strip) -1
                 else gutter + under.textX + ((l.getPrimaryHorizontal(0) + l.getPrimaryHorizontal(1)) / 2).toInt()
             } ?: -1
+            // A Task Resetter button whose row of text reaches a third of the way into the strip.
+            var reset: Block? = null
+            var resetX = -1
+            var resetW = -1
+            for (piece in here) {
+                if (piece.block.reset == Block.NONE) continue
+                val l = piece.layout ?: continue
+                val text = l.text as? android.text.Spanned ?: continue
+                val span = text.getSpans(0, text.length, ResetSpan::class.java).firstOrNull() ?: continue
+                val at = text.getSpanStart(span)
+                val row = l.getLineForOffset(at)
+                val rowTop = piece.top + piece.textTop + l.getLineTop(row)
+                val rowBottom = piece.top + piece.textTop + l.getLineBottom(row)
+                if (minOf(rowBottom, top + strip) - maxOf(rowTop, top) < strip / 3) continue
+                reset = piece.block
+                resetX = gutter + piece.textX + l.getPrimaryHorizontal(at).toInt()
+                resetW = span.width
+                break
+            }
             Row(
                 { draw(top, sig) }, sig, under.block.line, under.block.task, spoken(here, top, top + strip),
                 fold?.block?.line ?: -1, fold?.block?.fold == Block.FOLDED,
                 if (under.block.task) sourceLines?.getOrNull(under.block.line)?.removeSuffix("\r") else null,
                 boxX,
+                reset?.reset ?: 0, reset?.line ?: -1, resetX, resetW,
             )
         }
         return rows
@@ -491,7 +516,7 @@ object NoteRows {
             }
         }
         styled(b.text)
-        sb.append(b.task).append(b.code).append(b.rule).append(b.fold)
+        sb.append(b.task).append(b.code).append(b.rule).append(b.fold).append('r').append(b.reset)
         b.callout?.let { sb.append('c').append(it.color).append(it.icon).append(it.last) }
         b.table?.let { t -> sb.append('t').append(t.align); t.rows.forEach { row -> row.forEach(::styled); sb.append('\u0003') } }
         // 64 bits of SHA-1, so two different blocks don't share a layout by chance.
@@ -531,7 +556,8 @@ object NoteRows {
                         val fold = input.readInt()
                         val folded = input.readBoolean()
                         val source = if (input.readBoolean()) input.readUTF() else null
-                        Row({ image }, sig, line, task, text, fold, folded, source, input.readInt())
+                        val boxX = input.readInt()
+                        Row({ image }, sig, line, task, text, fold, folded, source, boxX, input.readInt(), input.readInt(), input.readInt(), input.readInt())
                     }
                 }
             }.getOrNull()?.also { memory["$id/$dark/$key"] = it }
@@ -575,6 +601,10 @@ object NoteRows {
                     out.writeBoolean(r.source != null)
                     r.source?.let { out.writeUTF(it.take(8000)) }
                     out.writeInt(r.boxX)
+                    out.writeInt(r.reset)
+                    out.writeInt(r.resetLine)
+                    out.writeInt(r.resetX)
+                    out.writeInt(r.resetW)
                 }
             }
             tmp.renameTo(file)
@@ -611,7 +641,19 @@ object NoteRows {
             else Intent().putExtra(EditorActivity.EXTRA_LINE, row.line).putExtra(EditorActivity.EXTRA_TOGGLE, row.task && reading)
                 .putExtra(EditorActivity.EXTRA_SOURCE, row.source),
         )
-        if (row.task && !reading && row.boxX >= 0) {
+        if (row.reset != 0 && row.resetX >= 0) {
+            // Over a Task Resetter button, in both modes: tapping it resets the tasks.
+            setViewVisibility(R.id.task_hit_box, android.view.View.VISIBLE)
+            setViewPadding(R.id.task_hit_box, row.resetX, 0, 0, 0)
+            if (android.os.Build.VERSION.SDK_INT >= 31) setViewLayoutWidth(R.id.task_hit, row.resetW.toFloat(), android.util.TypedValue.COMPLEX_UNIT_PX)
+            setContentDescription(R.id.task_hit, if (row.reset == Block.RESET_ALL) "Reset all tasks" else "Reset tasks")
+            setOnClickFillInIntent(
+                R.id.task_hit,
+                Intent().putExtra(TapActivity.EXTRA_RESET, row.reset).putExtra(EditorActivity.EXTRA_LINE, row.resetLine),
+            )
+        } else if (row.task && !reading && row.boxX >= 0) {
+            // (The reset button's target may have widened this view; back to its own size.)
+            if (android.os.Build.VERSION.SDK_INT >= 31) setViewLayoutWidth(R.id.task_hit, 44f, android.util.TypedValue.COMPLEX_UNIT_DIP)
             // A target the size of the fold arrows' over the box, clear of the fold arrow's gutter.
             val half = (22 * ctx.resources.displayMetrics.density).toInt()
             val gutter = if (row.fold >= 0) (18 * ctx.resources.displayMetrics.density).toInt() else 0

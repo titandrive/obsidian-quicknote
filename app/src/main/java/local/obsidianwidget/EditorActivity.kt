@@ -121,6 +121,23 @@ class EditorActivity : ComponentActivity() {
             NoteWidgetProvider.refreshNote(ctx, cfg.noteUri)
         }
 
+        /**
+         * Task Resetter's button on the widget: unticks the tasks it covers (see [Markdown.resetTasks]),
+         * also other marks like [-] when the plugin is set to clear those.
+         */
+        fun resetTasks(ctx: Context, cfg: WidgetConfig, line: Int, whole: Boolean) {
+            val other = runCatching {
+                Vault.readPath(ctx, cfg.vaultTree, ".obsidian/plugins/task-resetter/data.json")
+                    ?.let { org.json.JSONObject(it).optBoolean("clearOtherMarkers") }
+            }.getOrNull() ?: false
+            synchronized(TICKS) {
+                val text = Vault.read(ctx, cfg.uri) ?: return
+                val next = Markdown.resetTasks(text, line, whole, other) ?: return
+                Vault.write(ctx, cfg.uri, next)
+            }
+            NoteWidgetProvider.refreshNote(ctx, cfg.noteUri)
+        }
+
         private val TICKS = Any()
     }
 

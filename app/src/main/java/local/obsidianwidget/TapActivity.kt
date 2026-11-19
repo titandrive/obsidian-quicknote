@@ -24,6 +24,8 @@ class TapActivity : Activity() {
         private val SWAPS = Any()
         /** Turns reading mode on or off. */
         const val EXTRA_READ = "read"
+        /** A Task Resetter button: [Block.RESET_SECTION] or [Block.RESET_ALL], with its line. */
+        const val EXTRA_RESET = "reset"
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -61,6 +63,15 @@ class TapActivity : Activity() {
                     val cfg = WidgetStore.load(app, id) ?: return@thread
                     WidgetStore.save(app, id, cfg.copy(readOnly = !cfg.readOnly))
                     NoteWidgetProvider.update(app, AppWidgetManager.getInstance(app), id)
+                }
+            }
+            intent.getIntExtra(EXTRA_RESET, 0) != 0 -> {
+                val app = applicationContext
+                val whole = intent.getIntExtra(EXTRA_RESET, 0) == Block.RESET_ALL
+                val line = intent.getIntExtra(EditorActivity.EXTRA_LINE, -1)
+                thread {
+                    val cfg = WidgetStore.load(app, id) ?: return@thread
+                    EditorActivity.resetTasks(app, cfg, line, whole)
                 }
             }
             forward != null -> runCatching { startActivity(forward) }

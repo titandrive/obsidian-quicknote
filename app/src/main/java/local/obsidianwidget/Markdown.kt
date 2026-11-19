@@ -1,6 +1,11 @@
 package local.obsidianwidget
 
+import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Matrix
+import android.graphics.Paint
+import android.graphics.Path
+import android.graphics.RectF
 import android.graphics.Typeface
 import android.text.Layout
 import android.text.SpannableStringBuilder
@@ -9,6 +14,7 @@ import android.text.style.BackgroundColorSpan
 import android.text.style.ForegroundColorSpan
 import android.text.style.LeadingMarginSpan
 import android.text.style.QuoteSpan
+import android.text.style.ReplacementSpan
 import android.text.style.RelativeSizeSpan
 import android.text.style.StrikethroughSpan
 import android.text.style.StyleSpan
@@ -30,14 +36,66 @@ class Block(
     val fold: Int = NONE,
     /** A line of a callout, drawn in its box. */
     val callout: CalloutLine? = null,
+    /** A Task Resetter button on this line: [NONE], [RESET_SECTION] or [RESET_ALL]. */
+    val reset: Int = NONE,
 ) {
-    fun copy(text: CharSequence = this.text, fold: Int = this.fold, callout: CalloutLine? = this.callout) =
-        Block(text, line, task, code, rule, table, fold, callout)
+    fun copy(text: CharSequence = this.text, fold: Int = this.fold, callout: CalloutLine? = this.callout, reset: Int = this.reset) =
+        Block(text, line, task, code, rule, table, fold, callout, reset)
 
     companion object {
         const val NONE = 0
         const val OPEN = 1
         const val FOLDED = 2
+        const val RESET_SECTION = 1
+        const val RESET_ALL = 2
+    }
+}
+
+/**
+ * Task Resetter's button ([reset-tasks], or a reset-tasks code block), drawn as the plugin draws it:
+ * an outlined button with its icon in the accent colour and a muted label. One character wide in the
+ * text; [width] is how wide it's drawn, for the tap target over it.
+ */
+class ResetSpan(val whole: Boolean, private val accent: Int, private val border: Int, private val label: Int) : ReplacementSpan() {
+    var width = 0
+        private set
+    private val text get() = if (whole) "Reset all tasks" else "Reset tasks"
+
+    private fun size(paint: Paint) = paint.textSize * 0.85f
+
+    override fun getSize(paint: Paint, t: CharSequence?, start: Int, end: Int, fm: Paint.FontMetricsInt?): Int {
+        val s = size(paint)
+        val p = Paint(paint).apply { textSize = s }
+        // Room for the button's height, so it doesn't run into the lines around it.
+        if (fm != null) {
+            paint.getFontMetricsInt(fm)
+            val mid = (paint.ascent() + paint.descent()) / 2
+            val h = s * 1.75f
+            fm.ascent = minOf(fm.ascent, (mid - h / 2 - 1).toInt()); fm.top = minOf(fm.top, fm.ascent)
+            fm.descent = maxOf(fm.descent, (mid + h / 2 + 1).toInt()); fm.bottom = maxOf(fm.bottom, fm.descent)
+        }
+        width = (s * 0.2f + s * 0.65f + s * 1.1f + s * 0.4f + p.measureText(text) + s * 0.75f).toInt()
+        return width
+    }
+
+    override fun draw(c: Canvas, t: CharSequence?, start: Int, end: Int, x: Float, top: Int, y: Int, bottom: Int, paint: Paint) {
+        val s = size(paint)
+        val mid = y + (paint.ascent() + paint.descent()) / 2
+        val h = s * 1.75f
+        val left = x + s * 0.2f
+        val box = RectF(left, mid - h / 2, x + width.toFloat(), mid + h / 2)
+        val line = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = s * 0.08f; color = border }
+        c.drawRoundRect(box, s * 0.4f, s * 0.4f, line)
+        // The icon, Lucide's rotate-ccw-square, from its 24-unit box.
+        val icon = s * 1.1f
+        val path = Path(Callouts.icon("rotate-ccw-square"))
+        path.transform(Matrix().apply { setScale(icon / 24f, icon / 24f); postTranslate(left + s * 0.65f, mid - icon / 2) })
+        c.drawPath(path, Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE; strokeWidth = icon / 12f; color = accent
+            strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND
+        })
+        val p = Paint(paint).apply { textSize = s; color = label; isFakeBoldText = false; typeface = android.graphics.Typeface.create(paint.typeface, android.graphics.Typeface.NORMAL) }
+        c.drawText(text, left + s * 0.65f + icon + s * 0.4f, mid - (p.ascent() + p.descent()) / 2, p)
     }
 }
 
@@ -64,9 +122,14 @@ object Markdown {
     val RULE = Regex("^\\s*([-*_])(\\s*\\1){2,}\\s*$")
     val FENCE = Regex("^\\s*(```|~~~)")
     val TASK_BOX = Regex("^(\\s*[-*+] \\[)(.)(])")
+    /** A task's box for Task Resetter, which also resets numbered tasks. */
+    private val RESET_BOX = Regex("^(\\s*(?:[-*+]|\\d+[.)])\\s+\\[)([^\\]])(])")
+    /** Task Resetter's short form: [reset-tasks], or [reset-tasks all] for the whole note. */
+    val RESET_MARK = Regex("\\[reset-tasks( all)?]", RegexOption.IGNORE_CASE)
 
     val INLINE = Regex(
         "(?<code>`[^`]+`)" +
+            "|(?<reset>\\[(?i:reset-tasks)(?i: all)?])" +
             "|(?<comment>%%.*?%%)" +
             "|(?<wiki>!?\\[\\[[^\\]]+]])" +
             "|(?<link>!?\\[[^\\]]*]\\([^)]*\\))" +
@@ -116,6 +179,12 @@ object Markdown {
                 i++
                 while (i < lines.size && !lines[i].trimStart().startsWith(fence)) body.add(lines[i++])
                 i++
+                // Task Resetter's button block.
+                if (line.trim().removePrefix(fence).trim().equals("reset-tasks", ignoreCase = true)) {
+                    val whole = body.any { it.trim().equals("all", ignoreCase = true) }
+                    out.add(Block(button(whole, p), start, reset = if (whole) Block.RESET_ALL else Block.RESET_SECTION))
+                    continue
+                }
                 val sb = SpannableStringBuilder(body.joinToString("\n"))
                 span(sb, 0, TypefaceSpan("monospace"), ForegroundColorSpan(p.code), RelativeSizeSpan(0.9f))
                 out.add(Block(sb, start, code = true))
@@ -166,6 +235,7 @@ object Markdown {
 
             val quote = QUOTE.find(line)
             if (quote == null) calloutColor = null
+            val resetKind = resetOn(line)
             out.add(
                 when {
                     quote != null -> {
@@ -233,7 +303,7 @@ object Markdown {
                         Block(sb, i)
                     }
                     else -> Block(inline(line, p), i)
-                }
+                }.let { if (resetKind != Block.NONE) it.copy(reset = resetKind) else it }
             )
             i++
         }
@@ -275,6 +345,9 @@ object Markdown {
                     span(out, start, TypefaceSpan("monospace"), ForegroundColorSpan(p.code), BackgroundColorSpan(p.codeBg))
                 }
                 g["comment"] != null -> Unit
+                g["reset"] != null -> {
+                    out.append(button(t.contains("all", ignoreCase = true), p))
+                }
                 g["wiki"] != null -> {
                     val inner = t.removePrefix("!").removePrefix("[[").removeSuffix("]]")
                     val alias = inner.substringAfter('|', "")
@@ -314,6 +387,60 @@ object Markdown {
         out.append(s, last, s.length)
         return out
     }
+
+    /** Task Resetter's button, one character drawn by a [ResetSpan]. */
+    private fun button(whole: Boolean, p: Palette): SpannableStringBuilder =
+        SpannableStringBuilder("\uFFFC").also { it.setSpan(ResetSpan(whole, p.accent, p.faint, p.muted), 0, 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE) }
+
+    /** Whether [line] has a [reset-tasks] marker (outside `inline code`), and which kind. */
+    private fun resetOn(line: String): Int {
+        for (m in RESET_MARK.findAll(line)) {
+            if (line.substring(0, m.range.first).count { it == '`' } % 2 == 1) continue
+            return if (m.groupValues[1].isNotEmpty()) Block.RESET_ALL else Block.RESET_SECTION
+        }
+        return Block.NONE
+    }
+
+    /**
+     * Task Resetter's reset, as the plugin does it: for a button on [line], the section of the
+     * heading it's under (from the button to the next heading of the same or a higher level,
+     * subheadings included), or the whole note when [whole] or there's no heading above it. Unticks
+     * [x] (and, with [other], any other mark). Code blocks are left alone. Null if nothing changed.
+     */
+    fun resetTasks(src: String, line: Int, whole: Boolean, other: Boolean): String? {
+        val lines = src.split('\n').toMutableList()
+        val fenced = BooleanArray(lines.size)
+        var inFence = false
+        for (k in lines.indices) {
+            val marker = FENCE.containsMatchIn(lines[k])
+            if (marker) inFence = !inFence
+            fenced[k] = inFence || marker
+        }
+        fun level(k: Int) = if (fenced[k]) 0 else HEADING_START.find(lines[k])?.groupValues?.get(1)?.length ?: 0
+        var from = 0
+        var to = lines.size
+        if (!whole && lines.isNotEmpty()) {
+            var own = 0
+            var k = minOf(line, lines.size - 1)
+            while (k >= 0 && own == 0) own = level(k--)
+            if (own > 0) {
+                from = line + 1
+                to = (from until lines.size).firstOrNull { level(it) in 1..own } ?: lines.size
+            }
+        }
+        var changed = false
+        for (k in from until to) {
+            if (fenced[k]) continue
+            val m = RESET_BOX.find(lines[k]) ?: continue
+            val mark = m.groupValues[2]
+            if (mark == " " || (!other && mark != "x" && mark != "X")) continue
+            lines[k] = lines[k].replaceRange(m.groups[2]!!.range, " ")
+            changed = true
+        }
+        return if (changed) lines.joinToString("\n") else null
+    }
+
+    private val HEADING_START = Regex("^(#{1,6})\\s")
 
     /** A table row's cells: split on pipes that aren't escaped, without the ones at the ends. */
     private fun cells(row: String): List<String> =
