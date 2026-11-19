@@ -59,7 +59,7 @@ class Block(
 class ResetSpan(
     val whole: Boolean, private val accent: Int, private val border: Int, private val label: Int,
     /** Just the icon, square, when the plugin is set to hide the label. */
-    private val iconOnly: Boolean = false,
+    val iconOnly: Boolean = false,
 ) : ReplacementSpan() {
     var width = 0
         private set

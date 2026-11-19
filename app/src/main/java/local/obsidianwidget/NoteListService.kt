@@ -513,6 +513,8 @@ object NoteRows {
                         is android.text.style.RelativeSizeSpan -> span.sizeChange
                         is android.text.style.TypefaceSpan -> span.family
                         is android.text.style.QuoteSpan -> span.color
+                        // Task Resetter's button: which kind, and whether it's icon only.
+                        is ResetSpan -> "${span.whole}/${span.iconOnly}"
                         is android.text.style.LeadingMarginSpan -> "${span.getLeadingMargin(true)}/${span.getLeadingMargin(false)}"
                         else -> ""
                     },
