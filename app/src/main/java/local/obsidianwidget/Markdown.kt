@@ -272,7 +272,12 @@ object Markdown {
                         val m = HEADING.find(line)!!
                         val level = m.groupValues[1].length
                         val sb = inline(m.groupValues[2], p)
-                        span(sb, 0, StyleSpan(Typeface.BOLD), RelativeSizeSpan(p.headingSizes[level - 1]), ForegroundColorSpan(p.headings[level - 1]))
+                        val scale = p.headingSizes[level - 1]
+                        span(sb, 0, StyleSpan(Typeface.BOLD), RelativeSizeSpan(scale), ForegroundColorSpan(p.headings[level - 1]))
+                        // A Task Resetter button keeps body size on a heading, as in Obsidian.
+                        for (b in sb.getSpans(0, sb.length, ResetSpan::class.java)) {
+                            sb.setSpan(RelativeSizeSpan(1f / scale), sb.getSpanStart(b), sb.getSpanEnd(b), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                        }
                         Block(sb, i)
                     }
                     TASK.matches(line) -> {
