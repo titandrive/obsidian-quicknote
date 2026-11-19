@@ -52,7 +52,7 @@ class Block(
 }
 
 /**
- * Task Resetter's button ([reset-tasks], or a reset-tasks code block), drawn as the plugin draws it:
+ * Task Resetter's button ([reset-tasks] in a note), drawn as the plugin draws it:
  * an outlined button with its icon in the accent colour and a muted label. One character wide in the
  * text; [width] is how wide it's drawn, for the tap target over it.
  */
@@ -189,12 +189,6 @@ object Markdown {
                 i++
                 while (i < lines.size && !lines[i].trimStart().startsWith(fence)) body.add(lines[i++])
                 i++
-                // Task Resetter's button block.
-                if (line.trim().removePrefix(fence).trim().equals("reset-tasks", ignoreCase = true)) {
-                    val whole = body.any { it.trim().equals("all", ignoreCase = true) }
-                    out.add(Block(button(whole, p), start, reset = if (whole) Block.RESET_ALL else Block.RESET_SECTION))
-                    continue
-                }
                 val sb = SpannableStringBuilder(body.joinToString("\n"))
                 span(sb, 0, TypefaceSpan("monospace"), ForegroundColorSpan(p.code), RelativeSizeSpan(0.9f))
                 out.add(Block(sb, start, code = true))
