@@ -199,11 +199,8 @@ object Markdown {
         regions: Map<Int, Folds.Region> = emptyMap(), folded: Set<Int> = emptySet(),
         /** Task Resetter's buttons as just the icon (the plugin's "Hide the button label"). */
         resetIconOnly: Boolean = false,
-        /** Task Resetter's icon drawings by name, for markers with icon:. */
-        resetIcons: Map<String, String> = emptyMap(),
     ): List<Block> {
         iconOnly.set(resetIconOnly)
-        icons.set(resetIcons)
         val lines = src.split('\n').map { it.removeSuffix("\r") }
         val out = ArrayList<Block>()
         var i = 0
@@ -447,7 +444,7 @@ object Markdown {
 
     /** Task Resetter's button, one character drawn by a [ResetSpan]. */
     private fun button(mk: Marker, p: Palette): SpannableStringBuilder {
-        val path = mk.icon?.let { if (it == "rotate-ccw-square") null else icons.get()[it] }
+        val path = mk.icon?.let { if (it == "rotate-ccw-square") null else LucideIcons.data(it) }
         val span = ResetSpan(
             mk.label ?: resetLabel(mk), p.accent, p.faint, p.muted, iconOnly.get() == true,
             if (path != null) mk.icon!! else "rotate-ccw-square", path, mk.label != null,
@@ -455,8 +452,6 @@ object Markdown {
         return SpannableStringBuilder("\uFFFC").also { it.setSpan(span, 0, 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE) }
     }
 
-    /** The icons' drawings the plugin keeps for markers' icon: (its iconPaths), for this thread's [render]. */
-    private val icons = ThreadLocal.withInitial { emptyMap<String, String>() }
 
     /** A marker's button text, as the plugin labels it. */
     private fun resetLabel(m: Marker): String = when {

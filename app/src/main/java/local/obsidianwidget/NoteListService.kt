@@ -113,11 +113,10 @@ object NoteRows {
         // have one. A change in Obsidian redraws the widget.
         val resetIconOnly = text?.contains("reset-tasks", ignoreCase = true) == true &&
             TaskResetter.hideLabel(ctx, cfg.vaultTree) { NoteWidgetProvider.update(ctx.applicationContext, AppWidgetManager.getInstance(ctx), id) }
-        val resetIcons = if (text?.contains("icon:", ignoreCase = true) == true) TaskResetter.iconPaths(ctx, cfg.vaultTree) else emptyMap()
         fun rows(dark: Boolean): List<Row> {
-            val key = cacheKey(ctx, cfg, text, width, dark) + "|" + folded.sorted() + "|r" + resetIconOnly + resetIcons.keys.sorted()
+            val key = cacheKey(ctx, cfg, text, width, dark) + "|" + folded.sorted() + "|r" + resetIconOnly
             return cached(ctx, id, dark, key, cfg.noteUri)
-                ?: render(ctx, cfg, cfg.palette(ctx, dark), text, width, regions, folded, resetIconOnly, resetIcons).also { save(ctx, id, dark, key, cfg.noteUri, it) }
+                ?: render(ctx, cfg, cfg.palette(ctx, dark), text, width, regions, folded, resetIconOnly).also { save(ctx, id, dark, key, cfg.noteUri, it) }
         }
         if (!dayAndNight(cfg)) return Built(rows(cfg.isDark(ctx)), null)
         val day = rows(false)
@@ -134,17 +133,18 @@ object NoteRows {
     private fun render(
         ctx: Context, cfg: WidgetConfig, p: Palette, text: String?, fullWidth: Int,
         regions: Map<Int, Folds.Region>, folded: Set<Int>, resetIconOnly: Boolean = false,
-        resetIcons: Map<String, String> = emptyMap(),
     ): List<Row> {
         // A gutter for fold arrows, as in Obsidian, only when the note has something to fold.
         val gutter = if (regions.isEmpty()) 0 else dp(ctx, 18)
         val width = fullWidth - gutter
         val indent = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, cfg.textSize * 1.2f, ctx.resources.displayMetrics).toInt()
         val sourceLines = text?.split('\n')
+        // A Task Resetter button with its own icon (icon:) draws it from the bundled Lucide set.
+        if (text?.contains("icon:", ignoreCase = true) == true) LucideIcons.load(ctx)
         val blocks = if (text == null) {
             listOf(Block("Couldn't read ${cfg.notePath}. It may have been moved or renamed; tap the note's name to pick it again.", 0))
         } else {
-            Markdown.render(text, p, indent, regions, folded, resetIconOnly, resetIcons)
+            Markdown.render(text, p, indent, regions, folded, resetIconOnly)
         }
         val paint = TextBitmaps.paint(ctx, Fonts.typeface(cfg.fontFile), cfg.textSize, p.text)
         fun layout(t: CharSequence, w: Int) = StaticLayout.Builder.obtain(t, 0, t.length, paint, w.coerceAtLeast(1))
