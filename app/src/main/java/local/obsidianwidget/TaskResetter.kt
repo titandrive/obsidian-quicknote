@@ -27,6 +27,12 @@ object TaskResetter {
     fun hideLabel(ctx: Context, tree: Uri, onChanged: (() -> Unit)? = null): Boolean =
         settings(ctx, tree, onChanged)?.optBoolean("hideLabel") ?: false
 
+    /** The drawings of the icons buttons use (icon: in a marker), by name, as the plugin keeps them. */
+    fun iconPaths(ctx: Context, tree: Uri): Map<String, String> {
+        val o = settings(ctx, tree)?.optJSONObject("iconPaths") ?: return emptyMap()
+        return o.keys().asSequence().associateWith { o.optString(it) }.filterValues { it.isNotEmpty() }
+    }
+
     fun clearOtherMarkers(ctx: Context, tree: Uri): Boolean =
         settings(ctx, tree)?.optBoolean("clearOtherMarkers") ?: false
 

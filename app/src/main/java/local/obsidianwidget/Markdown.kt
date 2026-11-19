@@ -60,8 +60,14 @@ class ResetSpan(
     /** What it says: "Reset tasks", "Reset all tasks", "Reset H2 tasks", "Reset Morning". */
     val text: String, private val accent: Int, private val border: Int, private val label: Int,
     /** Just the icon, square, when the plugin is set to hide the label. */
-    val iconOnly: Boolean = false,
+    iconOnly: Boolean = false,
+    /** The icon's name ([iconPath] is its drawing, in a 24-unit box), from icon: in the marker. */
+    val icon: String = "rotate-ccw-square",
+    private val iconPath: String? = null,
+    /** The label was typed in the marker (label:), so it shows even when labels are hidden. */
+    ownLabel: Boolean = false,
 ) : ReplacementSpan() {
+    val iconOnly = iconOnly && !ownLabel
     var width = 0
         private set
 
@@ -91,10 +97,11 @@ class ResetSpan(
         val box = RectF(left, mid - h / 2, x + width.toFloat(), mid + h / 2)
         val line = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = s * 0.08f; color = border }
         c.drawRoundRect(box, s * 0.4f, s * 0.4f, line)
-        // The icon, Lucide's rotate-ccw-square, from its 24-unit box.
+        // The icon (Lucide's rotate-ccw-square, or the marker's own), from its 24-unit box.
         val icon = if (iconOnly) s * 1.2f else s * 1.1f
         val iconLeft = if (iconOnly) left + (s * 1.75f - icon) / 2 else left + s * 0.65f
-        val path = Path(Callouts.icon("rotate-ccw-square"))
+        val path = iconPath?.let { runCatching { androidx.core.graphics.PathParser.createPathFromPathData(it) }.getOrNull() }
+            ?: Path(Callouts.icon("rotate-ccw-square"))
         path.transform(Matrix().apply { setScale(icon / 24f, icon / 24f); postTranslate(iconLeft, mid - icon / 2) })
         c.drawPath(path, Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.STROKE; strokeWidth = icon / 12f; color = accent
@@ -135,11 +142,42 @@ object Markdown {
      * Task Resetter's marker: [reset-tasks], [reset-tasks all] (the whole note), [reset-tasks ##]
      * (every heading of that level) or [reset-tasks: Morning] (the heading named Morning).
      */
-    val RESET_MARK = Regex("\\[reset-tasks(?: (all)| (#{1,6})|: *([^\\]\n]*[^\\]\\s]))?]", RegexOption.IGNORE_CASE)
+    val RESET_MARK = Regex("\\[reset-tasks(?=[\\s:\\]])([^\\]\n]*)]", RegexOption.IGNORE_CASE)
+
+    /** A marker read as the plugin reads it: [all], or a heading [level], or a heading [name]; and its own [icon] and [label]. */
+    class Marker(val all: Boolean, val level: Int, val name: String?, val icon: String?, val label: String?)
+
+    /**
+     * Reads a [RESET_MARK] match's inside: all or ## (a heading level), then heading:, icon: and
+     * label: options in any order; [reset-tasks: Morning] is short for heading: Morning. Null if it
+     * isn't one (it then stays text).
+     */
+    fun marker(m: MatchResult): Marker? {
+        val inner = m.groupValues[1]
+        val opts = Regex("\\s+(icon|label|heading):\\s*", RegexOption.IGNORE_CASE).findAll(inner).toList()
+        val head = inner.substring(0, opts.firstOrNull()?.range?.first ?: inner.length)
+        var icon: String? = null
+        var label: String? = null
+        var name: String? = null
+        opts.forEachIndexed { i, o ->
+            val value = inner.substring(o.range.last + 1, opts.getOrNull(i + 1)?.range?.first ?: inner.length).trim()
+            if (value.isEmpty()) return@forEachIndexed
+            when (o.groupValues[1].lowercase()) {
+                "icon" -> icon = value.lowercase()
+                "label" -> label = value
+                else -> name = value
+            }
+        }
+        val level = Regex("^ (#{1,6})$").find(head)?.groupValues?.get(1)?.length ?: 0
+        val short = Regex("^:\\s*(.*\\S)\\s*$").find(head)?.groupValues?.get(1)
+        val all = head.equals(" all", ignoreCase = true)
+        if (head.isNotEmpty() && !all && level == 0 && short == null) return null
+        return Marker(all, level, name ?: short, icon, label)
+    }
 
     val INLINE = Regex(
         "(?<code>`[^`]+`)" +
-            "|(?<reset>\\[(?i:reset-tasks)(?: (?i:all)| #{1,6}|: *[^\\]\n]*[^\\]\\s])?])" +
+            "|(?<reset>\\[(?i:reset-tasks)(?=[\\s:\\]])[^\\]\n]*])" +
             "|(?<comment>%%.*?%%)" +
             "|(?<wiki>!?\\[\\[[^\\]]+]])" +
             "|(?<link>!?\\[[^\\]]*]\\([^)]*\\))" +
@@ -161,8 +199,11 @@ object Markdown {
         regions: Map<Int, Folds.Region> = emptyMap(), folded: Set<Int> = emptySet(),
         /** Task Resetter's buttons as just the icon (the plugin's "Hide the button label"). */
         resetIconOnly: Boolean = false,
+        /** Task Resetter's icon drawings by name, for markers with icon:. */
+        resetIcons: Map<String, String> = emptyMap(),
     ): List<Block> {
         iconOnly.set(resetIconOnly)
+        icons.set(resetIcons)
         val lines = src.split('\n').map { it.removeSuffix("\r") }
         val out = ArrayList<Block>()
         var i = 0
@@ -358,7 +399,8 @@ object Markdown {
                 }
                 g["comment"] != null -> Unit
                 g["reset"] != null -> {
-                    out.append(button(resetLabel(t), p))
+                    val mk = RESET_MARK.find(t)?.let(::marker)
+                    if (mk == null) out.append(t) else out.append(button(mk, p))
                 }
                 g["wiki"] != null -> {
                     val inner = t.removePrefix("!").removePrefix("[[").removeSuffix("]]")
@@ -404,18 +446,24 @@ object Markdown {
     private val iconOnly = ThreadLocal.withInitial { false }
 
     /** Task Resetter's button, one character drawn by a [ResetSpan]. */
-    private fun button(label: String, p: Palette): SpannableStringBuilder =
-        SpannableStringBuilder("\uFFFC").also { it.setSpan(ResetSpan(label, p.accent, p.faint, p.muted, iconOnly.get() == true), 0, 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE) }
+    private fun button(mk: Marker, p: Palette): SpannableStringBuilder {
+        val path = mk.icon?.let { if (it == "rotate-ccw-square") null else icons.get()[it] }
+        val span = ResetSpan(
+            mk.label ?: resetLabel(mk), p.accent, p.faint, p.muted, iconOnly.get() == true,
+            if (path != null) mk.icon!! else "rotate-ccw-square", path, mk.label != null,
+        )
+        return SpannableStringBuilder("\uFFFC").also { it.setSpan(span, 0, 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE) }
+    }
+
+    /** The icons' drawings the plugin keeps for markers' icon: (its iconPaths), for this thread's [render]. */
+    private val icons = ThreadLocal.withInitial { emptyMap<String, String>() }
 
     /** A marker's button text, as the plugin labels it. */
-    private fun resetLabel(marker: String): String {
-        val m = RESET_MARK.find(marker) ?: return "Reset tasks"
-        return when {
-            m.groupValues[1].isNotEmpty() -> "Reset all tasks"
-            m.groupValues[2].isNotEmpty() -> "Reset H${m.groupValues[2].length} tasks"
-            m.groupValues[3].isNotEmpty() -> "Reset ${m.groupValues[3].trim()}"
-            else -> "Reset tasks"
-        }
+    private fun resetLabel(m: Marker): String = when {
+        m.all -> "Reset all tasks"
+        m.level > 0 -> "Reset H${m.level} tasks"
+        m.name != null -> "Reset ${m.name}"
+        else -> "Reset tasks"
     }
 
     /** A heading's text as [reset-tasks: ...] matches it: no #s, closing #s or markers, lower case. */
@@ -426,7 +474,8 @@ object Markdown {
     private fun resetOn(line: String): Int {
         for (m in RESET_MARK.findAll(line)) {
             if (line.substring(0, m.range.first).count { it == '`' } % 2 == 1) continue
-            return if (m.groupValues[1].isNotEmpty()) Block.RESET_ALL else Block.RESET_SECTION
+            val mk = marker(m) ?: continue
+            return if (mk.all) Block.RESET_ALL else Block.RESET_SECTION
         }
         return Block.NONE
     }
@@ -455,10 +504,10 @@ object Markdown {
             val end = (h + 1 until lines.size).firstOrNull { level(it) in 1..level(h) } ?: lines.size
             ranges.add(h + 1 until end)
         }
-        val mark = lines.getOrNull(line)?.let { RESET_MARK.find(it) }
-        val all = mark?.groupValues?.get(1)?.isNotEmpty() ?: whole
-        val byLevel = mark?.groupValues?.get(2)?.length ?: 0
-        val byName = mark?.groupValues?.get(3)?.trim()?.lowercase().orEmpty()
+        val mark = lines.getOrNull(line)?.let { l -> RESET_MARK.findAll(l).firstNotNullOfOrNull(::marker) }
+        val all = mark?.all ?: whole
+        val byLevel = mark?.level ?: 0
+        val byName = mark?.name?.lowercase().orEmpty()
         when {
             all || lines.isEmpty() -> ranges.add(lines.indices)
             byLevel > 0 -> for (k in lines.indices) if (level(k) == byLevel) section(k)
