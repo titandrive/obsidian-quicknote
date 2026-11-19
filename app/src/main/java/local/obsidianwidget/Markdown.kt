@@ -65,7 +65,7 @@ class ResetSpan(
         private set
     private val text get() = if (whole) "Reset all tasks" else "Reset tasks"
 
-    private fun size(paint: Paint) = paint.textSize * 0.85f
+    private fun size(paint: Paint) = paint.textSize * 0.95f
 
     override fun getSize(paint: Paint, t: CharSequence?, start: Int, end: Int, fm: Paint.FontMetricsInt?): Int {
         val s = size(paint)
