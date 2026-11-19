@@ -98,7 +98,7 @@ class ResetSpan(
         val h = s * 1.75f
         val left = x + s * 0.2f
         val box = RectF(left, mid - h / 2, x + width.toFloat(), mid + h / 2)
-        val fade = if (dim) 0.45f else 1f
+        val fade = if (dim) 0.6f else 1f
         fun faded(c: Int) = if (dim) android.graphics.Color.argb((android.graphics.Color.alpha(c) * fade).toInt(), android.graphics.Color.red(c), android.graphics.Color.green(c), android.graphics.Color.blue(c)) else c
         val line = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = s * 0.08f; color = faded(border) }
         c.drawRoundRect(box, s * 0.4f, s * 0.4f, line)
