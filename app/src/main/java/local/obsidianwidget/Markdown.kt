@@ -68,6 +68,9 @@ class ResetSpan(
     ownLabel: Boolean = false,
 ) : ReplacementSpan() {
     val iconOnly = iconOnly && !ownLabel
+
+    /** Faded: nothing checked for it to reset (the plugin's "Dim when there's nothing to reset"). */
+    var dim = false
     var width = 0
         private set
 
@@ -95,7 +98,9 @@ class ResetSpan(
         val h = s * 1.75f
         val left = x + s * 0.2f
         val box = RectF(left, mid - h / 2, x + width.toFloat(), mid + h / 2)
-        val line = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = s * 0.08f; color = border }
+        val fade = if (dim) 0.45f else 1f
+        fun faded(c: Int) = if (dim) android.graphics.Color.argb((android.graphics.Color.alpha(c) * fade).toInt(), android.graphics.Color.red(c), android.graphics.Color.green(c), android.graphics.Color.blue(c)) else c
+        val line = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = s * 0.08f; color = faded(border) }
         c.drawRoundRect(box, s * 0.4f, s * 0.4f, line)
         // The icon (Lucide's rotate-ccw-square, or the marker's own), from its 24-unit box.
         val icon = if (iconOnly) s * 1.2f else s * 1.1f
@@ -104,11 +109,11 @@ class ResetSpan(
             ?: Path(Callouts.icon("rotate-ccw-square"))
         path.transform(Matrix().apply { setScale(icon / 24f, icon / 24f); postTranslate(iconLeft, mid - icon / 2) })
         c.drawPath(path, Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            style = Paint.Style.STROKE; strokeWidth = icon / 12f; color = accent
+            style = Paint.Style.STROKE; strokeWidth = icon / 12f; color = faded(accent)
             strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND
         })
         if (iconOnly) return
-        val p = Paint(paint).apply { textSize = s; color = label; isFakeBoldText = false; typeface = android.graphics.Typeface.create(paint.typeface, android.graphics.Typeface.NORMAL) }
+        val p = Paint(paint).apply { textSize = s; color = faded(label); isFakeBoldText = false; typeface = android.graphics.Typeface.create(paint.typeface, android.graphics.Typeface.NORMAL) }
         c.drawText(text, left + s * 0.65f + icon + s * 0.4f, mid - (p.ascent() + p.descent()) / 2, p)
     }
 }
@@ -199,6 +204,9 @@ object Markdown {
         regions: Map<Int, Folds.Region> = emptyMap(), folded: Set<Int> = emptySet(),
         /** Task Resetter's buttons as just the icon (the plugin's "Hide the button label"). */
         resetIconOnly: Boolean = false,
+        /** Fade Task Resetter's buttons that have nothing to reset; [resetOther] is its "Also clear other markers". */
+        resetDim: Boolean = false,
+        resetOther: Boolean = false,
     ): List<Block> {
         iconOnly.set(resetIconOnly)
         val lines = src.split('\n').map { it.removeSuffix("\r") }
@@ -353,7 +361,13 @@ object Markdown {
                         Block(sb, i)
                     }
                     else -> Block(inline(line, p), i)
-                }.let { if (resetKind != Block.NONE) it.copy(reset = resetKind) else it }
+                }.let { b ->
+                    if (resetKind == Block.NONE) return@let b
+                    if (resetDim && resetTasks(src, i, resetKind == Block.RESET_ALL, resetOther) == null) {
+                        (b.text as? Spanned)?.getSpans(0, b.text.length, ResetSpan::class.java)?.forEach { it.dim = true }
+                    }
+                    b.copy(reset = resetKind)
+                }
             )
             i++
         }
