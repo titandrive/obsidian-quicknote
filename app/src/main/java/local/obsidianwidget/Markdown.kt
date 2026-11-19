@@ -56,7 +56,11 @@ class Block(
  * an outlined button with its icon in the accent colour and a muted label. One character wide in the
  * text; [width] is how wide it's drawn, for the tap target over it.
  */
-class ResetSpan(val whole: Boolean, private val accent: Int, private val border: Int, private val label: Int) : ReplacementSpan() {
+class ResetSpan(
+    val whole: Boolean, private val accent: Int, private val border: Int, private val label: Int,
+    /** Just the icon, square, when the plugin is set to hide the label. */
+    private val iconOnly: Boolean = false,
+) : ReplacementSpan() {
     var width = 0
         private set
     private val text get() = if (whole) "Reset all tasks" else "Reset tasks"
@@ -74,7 +78,8 @@ class ResetSpan(val whole: Boolean, private val accent: Int, private val border:
             fm.ascent = minOf(fm.ascent, (mid - h / 2 - 1).toInt()); fm.top = minOf(fm.top, fm.ascent)
             fm.descent = maxOf(fm.descent, (mid + h / 2 + 1).toInt()); fm.bottom = maxOf(fm.bottom, fm.descent)
         }
-        width = (s * 0.2f + s * 0.65f + s * 1.1f + s * 0.4f + p.measureText(text) + s * 0.75f).toInt()
+        width = if (iconOnly) (s * 0.2f + s * 1.75f).toInt()
+        else (s * 0.2f + s * 0.65f + s * 1.1f + s * 0.4f + p.measureText(text) + s * 0.75f).toInt()
         return width
     }
 
@@ -87,13 +92,15 @@ class ResetSpan(val whole: Boolean, private val accent: Int, private val border:
         val line = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = s * 0.08f; color = border }
         c.drawRoundRect(box, s * 0.4f, s * 0.4f, line)
         // The icon, Lucide's rotate-ccw-square, from its 24-unit box.
-        val icon = s * 1.1f
+        val icon = if (iconOnly) s * 1.2f else s * 1.1f
+        val iconLeft = if (iconOnly) left + (s * 1.75f - icon) / 2 else left + s * 0.65f
         val path = Path(Callouts.icon("rotate-ccw-square"))
-        path.transform(Matrix().apply { setScale(icon / 24f, icon / 24f); postTranslate(left + s * 0.65f, mid - icon / 2) })
+        path.transform(Matrix().apply { setScale(icon / 24f, icon / 24f); postTranslate(iconLeft, mid - icon / 2) })
         c.drawPath(path, Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.STROKE; strokeWidth = icon / 12f; color = accent
             strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND
         })
+        if (iconOnly) return
         val p = Paint(paint).apply { textSize = s; color = label; isFakeBoldText = false; typeface = android.graphics.Typeface.create(paint.typeface, android.graphics.Typeface.NORMAL) }
         c.drawText(text, left + s * 0.65f + icon + s * 0.4f, mid - (p.ascent() + p.descent()) / 2, p)
     }
@@ -149,7 +156,10 @@ object Markdown {
     fun render(
         src: String, p: Palette, indentPx: Int,
         regions: Map<Int, Folds.Region> = emptyMap(), folded: Set<Int> = emptySet(),
+        /** Task Resetter's buttons as just the icon (the plugin's "Hide the button label"). */
+        resetIconOnly: Boolean = false,
     ): List<Block> {
+        iconOnly.set(resetIconOnly)
         val lines = src.split('\n').map { it.removeSuffix("\r") }
         val out = ArrayList<Block>()
         var i = 0
@@ -388,9 +398,12 @@ object Markdown {
         return out
     }
 
+    /** Whether the [render] running on this thread draws Task Resetter's buttons icon-only. */
+    private val iconOnly = ThreadLocal.withInitial { false }
+
     /** Task Resetter's button, one character drawn by a [ResetSpan]. */
     private fun button(whole: Boolean, p: Palette): SpannableStringBuilder =
-        SpannableStringBuilder("\uFFFC").also { it.setSpan(ResetSpan(whole, p.accent, p.faint, p.muted), 0, 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE) }
+        SpannableStringBuilder("\uFFFC").also { it.setSpan(ResetSpan(whole, p.accent, p.faint, p.muted, iconOnly.get() == true), 0, 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE) }
 
     /** Whether [line] has a [reset-tasks] marker (outside `inline code`), and which kind. */
     private fun resetOn(line: String): Int {

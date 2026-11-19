@@ -109,10 +109,14 @@ object NoteRows {
         val width = (TextBitmaps.widgetWidth(ctx, id) - dp(ctx, 14 + 6 + 8)).coerceAtLeast(1)
         val regions = text?.let(Folds::regions).orEmpty()
         val folded = if (unfolded) emptySet() else text?.let { Folds.folded(ctx, id, it) }.orEmpty()
+        // Task Resetter's buttons follow its "Hide the button label"; only looked up for notes that
+        // have one. A change in Obsidian redraws the widget.
+        val resetIconOnly = text?.contains("reset-tasks", ignoreCase = true) == true &&
+            TaskResetter.hideLabel(ctx, cfg.vaultTree) { NoteWidgetProvider.update(ctx.applicationContext, AppWidgetManager.getInstance(ctx), id) }
         fun rows(dark: Boolean): List<Row> {
-            val key = cacheKey(ctx, cfg, text, width, dark) + "|" + folded.sorted()
+            val key = cacheKey(ctx, cfg, text, width, dark) + "|" + folded.sorted() + "|r" + resetIconOnly
             return cached(ctx, id, dark, key, cfg.noteUri)
-                ?: render(ctx, cfg, cfg.palette(ctx, dark), text, width, regions, folded).also { save(ctx, id, dark, key, cfg.noteUri, it) }
+                ?: render(ctx, cfg, cfg.palette(ctx, dark), text, width, regions, folded, resetIconOnly).also { save(ctx, id, dark, key, cfg.noteUri, it) }
         }
         if (!dayAndNight(cfg)) return Built(rows(cfg.isDark(ctx)), null)
         val day = rows(false)
@@ -128,7 +132,7 @@ object NoteRows {
 
     private fun render(
         ctx: Context, cfg: WidgetConfig, p: Palette, text: String?, fullWidth: Int,
-        regions: Map<Int, Folds.Region>, folded: Set<Int>,
+        regions: Map<Int, Folds.Region>, folded: Set<Int>, resetIconOnly: Boolean = false,
     ): List<Row> {
         // A gutter for fold arrows, as in Obsidian, only when the note has something to fold.
         val gutter = if (regions.isEmpty()) 0 else dp(ctx, 18)
@@ -138,7 +142,7 @@ object NoteRows {
         val blocks = if (text == null) {
             listOf(Block("Couldn't read ${cfg.notePath}. It may have been moved or renamed; tap the note's name to pick it again.", 0))
         } else {
-            Markdown.render(text, p, indent, regions, folded)
+            Markdown.render(text, p, indent, regions, folded, resetIconOnly)
         }
         val paint = TextBitmaps.paint(ctx, Fonts.typeface(cfg.fontFile), cfg.textSize, p.text)
         fun layout(t: CharSequence, w: Int) = StaticLayout.Builder.obtain(t, 0, t.length, paint, w.coerceAtLeast(1))
