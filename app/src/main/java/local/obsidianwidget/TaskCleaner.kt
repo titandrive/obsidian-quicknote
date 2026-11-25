@@ -1,8 +1,9 @@
 package local.obsidianwidget
 
 import android.content.Context
+import android.provider.DocumentsContract
+import org.json.JSONArray
 import org.json.JSONObject
-import org.json.JSONTokener
 
 /**
  * The Task Cleaner plugin, done on the widget: a task ticked here is hidden (or deleted) the way
@@ -10,22 +11,18 @@ import org.json.JSONTokener
  * outside Obsidian alone (they're the device's own to deal with), so the widget does it. Notes with
  * task-cleaner-ignore: true in their frontmatter are left alone.
  *
- * The plugin used to be called Checker: its old id, block line and ignore property still work.
+ * Task Cleaner keeps hidden tasks in its settings, which the widget can't safely change while
+ * Obsidian may be holding them. So a task hidden here is added to an inbox file next to them
+ * (.obsidian/plugins/task-cleaner/widget-inbox.json), which Task Cleaner takes in when Obsidian
+ * comes to the front, and every minute while it's open.
  *
- * Hidden tasks go into a comment block at the bottom of the note, which Task Cleaner reads too:
- *
- *   %% Task Cleaner: hidden items
- *   after: "- [ ] Eggs" @3
- *   - [x] Milk
- *   shown: "- [x] Call the dentist"
- *   %%
- *
- * "after:" starts a hidden item: the line it goes back under ("top" for the top of the note) and the
- * line number it was on; its lines follow. "shown:" is an item back in the note for now.
+ * The plugin used to be called Checker: its old settings folder and ignore property still work.
  */
 object TaskCleaner {
     private val data = PluginData("task-cleaner")
     private val oldData = PluginData("checker")
+    private const val PLUGIN_DIR = ".obsidian/plugins/task-cleaner"
+    private const val INBOX = "widget-inbox.json"
 
     class Settings(val hide: Boolean, val delayMs: Long, val skipResetNotes: Boolean)
 
@@ -43,7 +40,8 @@ object TaskCleaner {
 
     /**
      * A task was just ticked on the widget: after the delay, takes it out of the note (with what's
-     * nested under it), into the block if hiding. If it was unticked again in the meantime, it stays.
+     * nested under it), into Task Cleaner's inbox if hiding. If it was unticked again in the meantime,
+     * it stays.
      */
     fun ticked(ctx: Context, cfg: WidgetConfig, text: String, line: Int, lock: Any) {
         val settings = settings(ctx, cfg) ?: return
@@ -54,83 +52,47 @@ object TaskCleaner {
             Thread.sleep(settings.delayMs)
             synchronized(lock) {
                 val now = Vault.read(app, cfg.uri) ?: return@thread
-                val next = takeOut(now, text.split('\n')[line], line, settings.hide) ?: return@thread
-                Vault.write(app, cfg.uri, next)
+                val taken = takeOut(now, text.split('\n')[line], line) ?: return@thread
+                if (settings.hide && !addToInbox(app, cfg, taken)) return@thread
+                Vault.write(app, cfg.uri, taken.text)
             }
             NoteWidgetProvider.refreshNote(app, cfg.noteUri)
         }
     }
 
+    /** A task taken out of a note: the note without it, its lines, and where it was. */
+    class Taken(val text: String, val lines: List<String>, val after: String?, val at: Int)
+
     /** [src] with the checked task [task] (the copy nearest [near]) taken out, or null if it's gone. */
-    fun takeOut(src: String, task: String, near: Int, keep: Boolean): String? {
-        val note = parse(src)
-        val at = note.body.indices.filter { note.body[it] == task }.minByOrNull { kotlin.math.abs(it - near) } ?: return null
-        val end = blockEnd(note.body, at)
-        val lines = note.body.subList(at, end).toMutableList()
-        note.body.subList(at, end).clear()
-        if (keep) note.entries.add(Entry.Hidden(if (at > 0) note.body[at - 1] else null, at, lines))
-        return serialize(note)
+    fun takeOut(src: String, task: String, near: Int): Taken? {
+        val body = src.split('\n').toMutableList()
+        val at = body.indices.filter { body[it] == task }.minByOrNull { kotlin.math.abs(it - near) } ?: return null
+        val end = blockEnd(body, at)
+        val lines = body.subList(at, end).toList()
+        body.subList(at, end).clear()
+        return Taken(body.joinToString("\n"), lines, if (at > 0) body[at - 1] else null, at)
     }
 
-    const val BLOCK_START = "%% Task Cleaner: hidden items"
-    /** The block's first line from when the plugin was called Checker: still read, written anew. */
-    private const val OLD_BLOCK_START = "%% Checker: hidden items"
-    private fun isBlockStart(line: String) = line.trim() == BLOCK_START || line.trim() == OLD_BLOCK_START
-
-    private val FRONTMATTER = Regex("^---\\r?\\n([\\s\\S]*?)\\r?\\n---(?:\\r?\\n|$)")
-    private val IGNORE = Regex("^(?:task-cleaner-ignore|checker-ignore):\\s*[\"']?(true|yes)[\"']?\\s*$", setOf(RegexOption.IGNORE_CASE, RegexOption.MULTILINE))
-
-    /** Whether the note's frontmatter has task-cleaner-ignore: true (or the older checker-ignore). */
-    fun isIgnored(text: String): Boolean = FRONTMATTER.find(text)?.let { IGNORE.containsMatchIn(it.groupValues[1]) } ?: false
-    private const val BLOCK_END = "%%"
-
-    sealed class Entry {
-        data class Hidden(val after: String?, val at: Int?, val lines: MutableList<String>) : Entry()
-        data class Shown(val line: String) : Entry()
-    }
-
-    class Note(val body: MutableList<String>, val entries: MutableList<Entry>, val hadBlock: Boolean)
-
-    private val AFTER = Regex("^after: (.*?)(?: @(\\d+))?$")
-    private val SHOWN = Regex("^shown: (.*)$")
-
-    fun parse(text: String): Note {
-        val lines = text.split('\n')
-        val start = lines.indexOfFirst(::isBlockStart)
-        if (start == -1) return Note(lines.toMutableList(), mutableListOf(), false)
-        var end = (start + 1 until lines.size).firstOrNull { lines[it].trim() == BLOCK_END } ?: lines.size
-        val entries = mutableListOf<Entry>()
-        for (line in lines.subList(start + 1, end.coerceAtMost(lines.size))) {
-            val after = AFTER.find(line)
-            val shown = SHOWN.find(line)
-            when {
-                after != null -> entries.add(Entry.Hidden(unquote(after.groupValues[1]), after.groupValues[2].toIntOrNull(), mutableListOf()))
-                shown != null -> entries.add(Entry.Shown(unquote(shown.groupValues[1]) ?: ""))
-                else -> when (val last = entries.lastOrNull()) {
-                    is Entry.Hidden -> last.lines.add(line)
-                    else -> if (line.isNotBlank()) entries.add(Entry.Hidden(null, null, mutableListOf(line)))
-                }
-            }
+    /** Adds a hidden task to Task Cleaner's inbox file. False if it couldn't be written. */
+    private fun addToInbox(ctx: Context, cfg: WidgetConfig, taken: Taken): Boolean = runCatching {
+        val tree = cfg.vaultTree
+        val file = Vault.find(ctx, tree, "$PLUGIN_DIR/$INBOX") ?: run {
+            val dir = Vault.find(ctx, tree, PLUGIN_DIR) ?: return false
+            DocumentsContract.createDocument(ctx.contentResolver, dir, "application/octet-stream", INBOX) ?: return false
         }
-        val body = (lines.subList(0, start) + if (end + 1 <= lines.size) lines.subList(end + 1, lines.size) else emptyList()).toMutableList()
-        entries.removeAll { it is Entry.Hidden && it.lines.isEmpty() }
-        return Note(body, entries, true)
-    }
-
-    /** The note's text: its lines, then the block if it has items (on its own, after a blank line). */
-    fun serialize(note: Note): String {
-        if (note.entries.isEmpty() && !note.hadBlock) return note.body.joinToString("\n")
-        val body = note.body.toMutableList()
-        while (body.isNotEmpty() && body.last().isBlank()) body.removeAt(body.size - 1)
-        if (note.entries.isEmpty()) return body.joinToString("\n") + "\n"
-        val block = note.entries.flatMap { e ->
-            when (e) {
-                is Entry.Hidden -> listOf("after: ${quote(e.after)}" + (e.at?.let { " @$it" } ?: "")) + e.lines
-                is Entry.Shown -> listOf("shown: ${quote(e.line)}")
-            }
-        }
-        return (body + (if (body.isNotEmpty()) listOf("") else emptyList()) + BLOCK_START + block + BLOCK_END).joinToString("\n") + "\n"
-    }
+        val items = Vault.read(ctx, file)?.takeIf { it.isNotBlank() }?.let { runCatching { JSONArray(it) }.getOrNull() } ?: JSONArray()
+        items.put(
+            JSONObject()
+                .put("path", cfg.notePath)
+                .put("kind", "hidden")
+                .put("after", taken.after ?: JSONObject.NULL)
+                .put("at", taken.at)
+                .put("lines", JSONArray(taken.lines))
+                .put("hiddenAt", System.currentTimeMillis()),
+        )
+        Vault.write(ctx, file, items.toString())
+        true
+    }.getOrDefault(false)
 
     /** The line after a task and the lines nested (indented) under it. */
     fun blockEnd(lines: List<String>, at: Int): Int {
@@ -142,10 +104,9 @@ object TaskCleaner {
 
     private fun indentOf(line: String) = line.takeWhile { it == ' ' || it == '\t' }.sumOf { if (it == '\t') 4L else 1L }.toInt()
 
-    private fun quote(line: String?) = if (line == null) "top" else JSONObject.quote(line)
+    private val FRONTMATTER = Regex("^---\\r?\\n([\\s\\S]*?)\\r?\\n---(?:\\r?\\n|$)")
+    private val IGNORE = Regex("^(?:task-cleaner-ignore|checker-ignore):\\s*[\"']?(true|yes)[\"']?\\s*$", setOf(RegexOption.IGNORE_CASE, RegexOption.MULTILINE))
 
-    private fun unquote(text: String): String? {
-        if (text == "top") return null
-        return runCatching { JSONTokener(text).nextValue() as String }.getOrNull() ?: text
-    }
+    /** Whether the note's frontmatter has task-cleaner-ignore: true (or the older checker-ignore). */
+    fun isIgnored(text: String): Boolean = FRONTMATTER.find(text)?.let { IGNORE.containsMatchIn(it.groupValues[1]) } ?: false
 }
