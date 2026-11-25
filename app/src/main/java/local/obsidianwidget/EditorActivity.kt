@@ -120,14 +120,14 @@ class EditorActivity : ComponentActivity() {
                 text to next
             }
             NoteWidgetProvider.refreshNote(ctx, cfg.noteUri)
-            // Ticked (from [ ] to [x], not unticked): Checker hides it after its delay, if it's in
+            // Ticked (from [ ] to [x], not unticked): Task Cleaner hides it after its delay, if it's in
             // the vault.
             val before = text.split('\n')
             val after = next.split('\n')
             val at = after.indices.firstOrNull { it >= before.size || before[it] != after[it] } ?: return
             fun mark(l: String?) = l?.let { Markdown.TASK_BOX.find(it)?.groupValues?.get(2) }
             if (mark(before.getOrNull(at)) == " " && mark(after[at])?.lowercase() == "x") {
-                runCatching { Checker.ticked(ctx, cfg, next, at, TICKS) }
+                runCatching { TaskCleaner.ticked(ctx, cfg, next, at, TICKS) }
             }
         }
 

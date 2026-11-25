@@ -5,13 +5,16 @@ import org.json.JSONObject
 import org.json.JSONTokener
 
 /**
- * The Checker plugin, done on the widget: a task ticked here is hidden (or deleted) the way Checker
- * does in Obsidian, after the same delay. Checker in Obsidian leaves changes made outside Obsidian
- * alone (they're the device's own to deal with), so the widget does it.
+ * The Task Cleaner plugin, done on the widget: a task ticked here is hidden (or deleted) the way
+ * Task Cleaner does in Obsidian, after the same delay. Task Cleaner in Obsidian leaves changes made
+ * outside Obsidian alone (they're the device's own to deal with), so the widget does it. Notes with
+ * task-cleaner-ignore: true in their frontmatter are left alone.
  *
- * Hidden tasks go into a comment block at the bottom of the note, which Checker reads too:
+ * The plugin used to be called Checker: its old id, block line and ignore property still work.
  *
- *   %% Checker: hidden items
+ * Hidden tasks go into a comment block at the bottom of the note, which Task Cleaner reads too:
+ *
+ *   %% Task Cleaner: hidden items
  *   after: "- [ ] Eggs" @3
  *   - [x] Milk
  *   shown: "- [x] Call the dentist"
@@ -20,14 +23,15 @@ import org.json.JSONTokener
  * "after:" starts a hidden item: the line it goes back under ("top" for the top of the note) and the
  * line number it was on; its lines follow. "shown:" is an item back in the note for now.
  */
-object Checker {
-    private val data = PluginData("checker")
+object TaskCleaner {
+    private val data = PluginData("task-cleaner")
+    private val oldData = PluginData("checker")
 
     class Settings(val hide: Boolean, val delayMs: Long, val skipResetNotes: Boolean)
 
-    /** Checker's settings, or null if it isn't in the vault. */
+    /** Task Cleaner's settings, or null if it isn't in the vault. */
     fun settings(ctx: Context, cfg: WidgetConfig): Settings? {
-        val json = data.settings(ctx, cfg.vaultTree) ?: return null
+        val json = data.settings(ctx, cfg.vaultTree) ?: oldData.settings(ctx, cfg.vaultTree) ?: return null
         return Settings(
             hide = json.optString("action", "hide") != "delete",
             delayMs = json.optLong("delayMs", 500),
@@ -44,6 +48,7 @@ object Checker {
     fun ticked(ctx: Context, cfg: WidgetConfig, text: String, line: Int, lock: Any) {
         val settings = settings(ctx, cfg) ?: return
         if (settings.skipResetNotes && TASK_RESETTER_MARKER.containsMatchIn(text)) return
+        if (isIgnored(text)) return
         val app = ctx.applicationContext
         kotlin.concurrent.thread {
             Thread.sleep(settings.delayMs)
@@ -67,7 +72,16 @@ object Checker {
         return serialize(note)
     }
 
-    const val BLOCK_START = "%% Checker: hidden items"
+    const val BLOCK_START = "%% Task Cleaner: hidden items"
+    /** The block's first line from when the plugin was called Checker: still read, written anew. */
+    private const val OLD_BLOCK_START = "%% Checker: hidden items"
+    private fun isBlockStart(line: String) = line.trim() == BLOCK_START || line.trim() == OLD_BLOCK_START
+
+    private val FRONTMATTER = Regex("^---\\r?\\n([\\s\\S]*?)\\r?\\n---(?:\\r?\\n|$)")
+    private val IGNORE = Regex("^(?:task-cleaner-ignore|checker-ignore):\\s*[\"']?(true|yes)[\"']?\\s*$", setOf(RegexOption.IGNORE_CASE, RegexOption.MULTILINE))
+
+    /** Whether the note's frontmatter has task-cleaner-ignore: true (or the older checker-ignore). */
+    fun isIgnored(text: String): Boolean = FRONTMATTER.find(text)?.let { IGNORE.containsMatchIn(it.groupValues[1]) } ?: false
     private const val BLOCK_END = "%%"
 
     sealed class Entry {
@@ -82,7 +96,7 @@ object Checker {
 
     fun parse(text: String): Note {
         val lines = text.split('\n')
-        val start = lines.indexOfFirst { it.trim() == BLOCK_START }
+        val start = lines.indexOfFirst(::isBlockStart)
         if (start == -1) return Note(lines.toMutableList(), mutableListOf(), false)
         var end = (start + 1 until lines.size).firstOrNull { lines[it].trim() == BLOCK_END } ?: lines.size
         val entries = mutableListOf<Entry>()

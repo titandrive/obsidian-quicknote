@@ -245,7 +245,7 @@ object Markdown {
             }
 
             // A comment over several lines, hidden as in Obsidian: from a line starting with %% (on
-            // its own, or with text after it, like Checker's "%% Checker: hidden items") that doesn't
+            // its own, or with text after it, like Task Cleaner's "%% Task Cleaner: hidden items") that doesn't
             // close on the same line, to the next line with %% in it.
             if (trimmed.startsWith("%%") && !trimmed.substring(2).contains("%%")) {
                 i++
