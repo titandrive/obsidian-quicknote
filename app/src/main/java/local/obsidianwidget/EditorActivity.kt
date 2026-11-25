@@ -361,8 +361,8 @@ class EditorActivity : ComponentActivity() {
     }
 
     private fun cursorFor(text: String, line: Int): Int {
-        // No line (the edit button): the top of the note.
-        if (line < 0) return 0
+        // No line (the edit button): the top of the note, below front matter that's hidden.
+        if (line < 0) return if (!sourceMode && Markdown.hidesFrontMatter(text)) Markdown.frontMatter(text)?.second ?: 0 else 0
         var offset = 0
         repeat(line) {
             val nl = text.indexOf('\n', offset)
@@ -388,7 +388,11 @@ class EditorActivity : ComponentActivity() {
         val active = LivePreview.activeLines(value.text, value.selection.start, value.selection.end)
         val cursor = value.selection.start
         val regions = remember(value.text) { Folds.regions(value.text) }
-        val collapsed = remember(value.text, folded) { Folds.hiddenLines(value.text, folded, regions) }
+        // Front matter hidden by Frontmatter Hider stays hidden here too, except in source mode.
+        val frontMatter = if (!sourceMode && Markdown.hidesFrontMatter(value.text)) Markdown.frontMatter(value.text) else null
+        val collapsed = remember(value.text, folded, frontMatter) {
+            Folds.hiddenLines(value.text, folded, regions) + (frontMatter?.let { 0..it.first } ?: IntRange.EMPTY)
+        }
         val density = LocalDensity.current
         // Tables are drawn as grids, as in Obsidian, except while the cursor is in one.
         val measurer = rememberTextMeasurer()
@@ -504,7 +508,17 @@ class EditorActivity : ComponentActivity() {
                     // Scrolled here rather than inside the field, so it can be moved to the tapped line.
                     BasicTextField(
                         value = value,
-                        onValueChange = {
+                        onValueChange = { changed ->
+                            var it = changed
+                            if (frontMatter != null) {
+                                // Hidden front matter can't be changed (a Backspace at the top of the
+                                // note would join onto it), and the cursor stays out of it.
+                                val head = value.text.substring(0, frontMatter.second)
+                                if (!it.text.startsWith(head)) it = it.copy(text = value.text, selection = value.selection)
+                                val start = it.selection.start.coerceAtLeast(frontMatter.second.coerceAtMost(it.text.length))
+                                val end = it.selection.end.coerceAtLeast(start)
+                                if (start != it.selection.start || end != it.selection.end) it = it.copy(selection = TextRange(start, end))
+                            }
                             val next = LivePreview.continueList(value, it)
                             history.record(value, next)
                             // Folds follow their lines when lines are added or removed above them.

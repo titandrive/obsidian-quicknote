@@ -555,6 +555,26 @@ object Markdown {
      * drew it), a line that no longer matches, because lines were added or removed since, is
      * looked for nearby, ticked or not.
      */
+    /**
+     * The note's front matter: the line its closing --- is on, and where the text after it starts.
+     * Null if the note has none.
+     */
+    fun frontMatter(text: String): Pair<Int, Int>? {
+        val lines = text.split('\n')
+        if (lines.firstOrNull()?.trim() != "---") return null
+        val end = (1 until lines.size).firstOrNull { lines[it].trim() == "---" } ?: return null
+        val offset = lines.take(end + 1).sumOf { it.length + 1 }.coerceAtMost(text.length)
+        return end to offset
+    }
+
+    private val HIDE_FRONT_MATTER = Regex("^hide_frontmatter:\\s*[\"']?true[\"']?\\s*$", RegexOption.MULTILINE)
+
+    /** Whether the note's front matter is hidden by the Frontmatter Hider plugin (hide_frontmatter: true). */
+    fun hidesFrontMatter(text: String): Boolean {
+        val (end, _) = frontMatter(text) ?: return false
+        return HIDE_FRONT_MATTER.containsMatchIn(text.split('\n').subList(1, end).joinToString("\n"))
+    }
+
     fun toggleTask(src: String, line: Int, expected: String? = null): String? {
         if (expected != null) {
             val lines = src.split('\n')

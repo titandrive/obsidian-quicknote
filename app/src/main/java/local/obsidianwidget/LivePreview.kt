@@ -78,7 +78,9 @@ class LivePreview(
     private fun toText(cut: IntArray, offset: Int): Int {
         var shift = 0
         for (k in cut.indices step 2) {
-            if (offset > cut[k] - shift) shift += cut[k + 1] - cut[k] else break
+            // Lines left out at the very top (hidden front matter): the top of what's shown is after
+            // them, so nothing typed there goes into them.
+            if (offset > cut[k] - shift || (cut[k] == 0 && offset == 0)) shift += cut[k + 1] - cut[k] else break
         }
         return offset + shift
     }
