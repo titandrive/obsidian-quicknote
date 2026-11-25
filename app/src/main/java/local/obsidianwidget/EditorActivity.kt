@@ -113,12 +113,22 @@ class EditorActivity : ComponentActivity() {
          * writing it back could lose the first tick.
          */
         fun toggleTask(ctx: Context, cfg: WidgetConfig, line: Int, expected: String? = null) {
-            synchronized(TICKS) {
+            val (text, next) = synchronized(TICKS) {
                 val text = Vault.read(ctx, cfg.uri) ?: return
                 val next = Markdown.toggleTask(text, line, expected) ?: return
                 Vault.write(ctx, cfg.uri, next)
+                text to next
             }
             NoteWidgetProvider.refreshNote(ctx, cfg.noteUri)
+            // Ticked (from [ ] to [x], not unticked): Checker hides it after its delay, if it's in
+            // the vault.
+            val before = text.split('\n')
+            val after = next.split('\n')
+            val at = after.indices.firstOrNull { it >= before.size || before[it] != after[it] } ?: return
+            fun mark(l: String?) = l?.let { Markdown.TASK_BOX.find(it)?.groupValues?.get(2) }
+            if (mark(before.getOrNull(at)) == " " && mark(after[at])?.lowercase() == "x") {
+                runCatching { Checker.ticked(ctx, cfg, next, at, TICKS) }
+            }
         }
 
         /**
