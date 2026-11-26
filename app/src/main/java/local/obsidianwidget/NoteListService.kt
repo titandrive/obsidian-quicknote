@@ -324,7 +324,8 @@ object NoteRows {
             // Every strip beside the foldable line's first row of text takes taps for it, so a big
             // heading's arrow is as easy to hit as its text is tall. When two lines' rows both
             // reach into a strip (a big heading's spills into the next line's), the strip goes to
-            // the one covering more of it.
+            // the one covering more of it. A row only grazing the strip (less than a third of it,
+            // and not its arrow) doesn't take it, so it can't cover the line beside it.
             val here = near(top, top + strip).map { pieces[it] }
             var fold: Piece? = null
             var foldOverlap = 0
@@ -332,6 +333,8 @@ object NoteRows {
                 if (piece.block.fold == Block.NONE) continue
                 val (rowTop, rowBottom) = firstRow(piece)
                 val overlap = minOf(rowBottom, top + strip) - maxOf(rowTop, top)
+                val arrowHere = arrowY(piece) in top until top + strip
+                if (overlap < strip / 3 && !arrowHere) continue
                 if (overlap > foldOverlap) {
                     fold = piece
                     foldOverlap = overlap
@@ -685,6 +688,10 @@ object NoteRows {
         // The gutter over a fold arrow folds or unfolds, rather than opening the editor.
         if (row.fold >= 0) {
             setViewVisibility(R.id.fold_hit, android.view.View.VISIBLE)
+            // On another line's task, just the arrow's gutter, clear of the task's checkbox.
+            if (android.os.Build.VERSION.SDK_INT >= 31) {
+                setViewLayoutWidth(R.id.fold_hit, if (row.task && row.fold != row.line) 18f else 48f, android.util.TypedValue.COMPLEX_UNIT_DIP)
+            }
             setContentDescription(R.id.fold_hit, if (row.folded) "Unfold" else "Fold")
             setOnClickFillInIntent(R.id.fold_hit, Intent().putExtra(TapActivity.EXTRA_FOLD, row.fold))
         } else {
