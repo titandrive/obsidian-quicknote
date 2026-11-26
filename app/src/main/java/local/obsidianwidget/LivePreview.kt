@@ -47,10 +47,10 @@ class LivePreview(
     override fun filter(text: AnnotatedString): TransformedText {
         val shown = annotate(text.text)
         val cut = removed
-        val gap = added
+        val marks = ends
         return TransformedText(shown, object : OffsetMapping {
-            override fun originalToTransformed(offset: Int) = toShown(cut, gap, offset)
-            override fun transformedToOriginal(offset: Int) = toText(cut, gap, offset)
+            override fun originalToTransformed(offset: Int) = toShown(cut, marks, offset)
+            override fun transformedToOriginal(offset: Int) = toText(cut, marks, offset)
         })
     }
 
@@ -61,28 +61,28 @@ class LivePreview(
     @Volatile private var removed = IntArray(0)
 
     /**
-     * The empty lines put in above headings that follow text, for the space Obsidian leaves there:
-     * each is a line break shown just before the heading, at that point of the text with folded
-     * lines left out. Lines of their own, so the cursor at the end of the line before stays there.
+     * The ends of lines right before a heading's space, where an invisible character is put in
+     * (only in what's shown): at that point of the text with folded lines left out. The space is
+     * the line break after it made a short paragraph of its own, and the cursor at the end of the
+     * line would be drawn at that paragraph's start, below the line; before the character, it's
+     * drawn on the line.
      */
-    @Volatile private var added = IntArray(0)
+    @Volatile private var ends = IntArray(0)
 
     /** Where [offset] in the text is in what's shown; inside folded lines, where they were. */
-    fun toShown(offset: Int) = toShown(removed, added, offset)
+    fun toShown(offset: Int) = toShown(removed, ends, offset)
 
     /** Where [offset] in what's shown is in the text. */
-    fun toText(offset: Int) = toText(removed, added, offset)
+    fun toText(offset: Int) = toText(removed, ends, offset)
 
-    private fun toShown(cut: IntArray, gap: IntArray, offset: Int): Int {
+    private fun toShown(cut: IntArray, marks: IntArray, offset: Int): Int {
         val c = toShown(cut, offset)
-        // A heading's own start is after the space put in above it.
-        return c + gap.count { it <= c }
+        return c + marks.count { it < c }
     }
 
-    private fun toText(cut: IntArray, gap: IntArray, offset: Int): Int {
-        // On a space put in above a heading, that's the heading's start.
+    private fun toText(cut: IntArray, marks: IntArray, offset: Int): Int {
         var c = offset
-        for ((k, at) in gap.withIndex()) if (at + k < offset) c-- else break
+        for ((k, at) in marks.withIndex()) if (at + k < offset) c-- else break
         return toText(cut, c)
     }
 
@@ -125,13 +125,17 @@ class LivePreview(
      * Styles each line on its own, reusing lines styled before, so typing in a long note only
      * restyles the line being edited rather than the whole note on every keystroke.
      */
+    /** The lines given space above them (headings after text), as last annotated: their text sits at the bottom of the line. */
+    val gaps = HashSet<Int>()
+
     fun annotate(text: String): AnnotatedString {
         val lines = text.split('\n')
         val out = AnnotatedString.Builder(text.length)
         val cut = ArrayList<Int>()
-        val gap = ArrayList<Int>()
+        val marks = ArrayList<Int>()
         // Each shown line's paragraph styles (callouts), applied once its line break is in, so they
         // take it in: one that stopped short left the break a paragraph of its own, an empty line.
+        gaps.clear()
         var pending: List<AnnotatedString.Range<ParagraphStyle>> = emptyList()
         var pendingStart = 0
         var shownAny = false
@@ -155,25 +159,32 @@ class LivePreview(
                 if (cut.isNotEmpty() && cut.last() == offset) cut[cut.lastIndex] = to else { cut.add(offset); cut.add(to) }
                 if (i == lines.lastIndex && cut[cut.lastIndex - 1] > 0) cut[cut.lastIndex - 1]--
             } else {
+                // Space above a heading with text right before it, as Obsidian (and the widget) has:
+                // the line break before it made a short line of its own. (A break at the edge of a
+                // paragraph with a style of its own shows as an empty line that paragraph's height;
+                // here that's the point.) Not after a line with styles of its own, a callout's say.
+                val level = if (!source && tableRows[i] == null && ctx.fence == null && !ctx.frontMatter && Markdown.HEADING.matches(line)) line.takeWhile { it == '#' }.length else 0
+                val gapped = level > 0 && shownAny && !lastBlank && pending.isEmpty()
+                // The cursor at the end of the line before stays on it: see [ends].
+                if (gapped) {
+                    marks.add(out.length - marks.size)
+                    out.append('\u200B')
+                }
                 // The line break before this line, which belongs to the line shown before it.
                 if (shownAny) out.append('\n')
-                for (ps in pending) out.addStyle(ps.item, pendingStart + ps.start, out.length)
-                // Space above a heading with text right before it, as Obsidian (and the widget) has:
-                // a short empty line put in above it, only in what's shown. Not after a line with
-                // styles of its own, a callout's say.
-                val level = if (!source && tableRows[i] == null && ctx.fence == null && !ctx.frontMatter && Markdown.HEADING.matches(line)) line.takeWhile { it == '#' }.length else 0
-                if (level > 0 && shownAny && !lastBlank && pending.isEmpty()) {
-                    gap.add(out.length - gap.size)
-                    out.append('\n')
+                if (gapped) {
                     out.addStyle(
                         ParagraphStyle(
+                            // It shows as two lines of this height.
                             lineHeight = (HEADING_GAP / 2).em,
                             lineHeightStyle = LineHeightStyle(LineHeightStyle.Alignment.Center, LineHeightStyle.Trim.None),
                             platformStyle = androidx.compose.ui.text.PlatformParagraphStyle(includeFontPadding = false),
                         ),
                         out.length - 1, out.length,
                     )
+                    gaps.add(i)
                 }
+                for (ps in pending) out.addStyle(ps.item, pendingStart + ps.start, out.length)
                 shownAny = true
                 pendingStart = out.length
                 val rowHeight = tableRows[i]
@@ -198,7 +209,7 @@ class LivePreview(
         }
         for (ps in pending) out.addStyle(ps.item, pendingStart + ps.start, out.length)
         removed = cut.toIntArray()
-        added = gap.toIntArray()
+        ends = marks.toIntArray()
         return out.toAnnotatedString()
     }
 
