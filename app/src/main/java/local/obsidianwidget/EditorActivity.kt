@@ -650,6 +650,20 @@ class EditorActivity : ComponentActivity() {
             }
         }
         LaunchedEffect(loaded) { if (loaded) focus.requestFocus() }
+        // The line being typed on stays in view, clear of the toolbar, as the text, the cursor or
+        // the room for the note (the keyboard opening, the toolbar showing) changes.
+        LaunchedEffect(value.text, value.selection, layout, scroll.viewportSize) {
+            val l = layout ?: return@LaunchedEffect
+            if (!loaded || scrollToCursor || scroll.viewportSize == 0) return@LaunchedEffect
+            val rect = l.getCursorRect(preview.toShown(value.selection.end).coerceIn(0, l.layoutInput.text.length))
+            val margin = with(density) { 8.dp.toPx() }
+            val top = rect.top + padTop - margin
+            val bottom = rect.bottom + padTop + margin
+            when {
+                bottom > scroll.value + scroll.viewportSize -> scroll.scrollTo((bottom - scroll.viewportSize).toInt())
+                top < scroll.value -> scroll.scrollTo(top.toInt().coerceAtLeast(0))
+            }
+        }
         LaunchedEffect(scrollToCursor, layout) {
             val l = layout ?: return@LaunchedEffect
             if (!scrollToCursor || !loaded) return@LaunchedEffect
