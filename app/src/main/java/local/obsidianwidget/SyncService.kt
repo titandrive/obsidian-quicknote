@@ -24,6 +24,8 @@ class SyncService : Service() {
         private const val CHANNEL = "sync"
         private const val ID = 1
         private const val LOG_LINES = 300
+        /** Stands for the widget's Task Cleaner inbox among the files watched. */
+        private const val INBOX = "\u0000inbox"
 
         fun start(ctx: Context) {
             val intent = Intent(ctx, SyncService::class.java)
@@ -121,6 +123,17 @@ class SyncService : Service() {
         }
     }
 
+    /** Takes the widget's inbox into Task Cleaner's settings a second after it last changed. */
+    private val takeIn = Runnable {
+        val vault = HeadlessSync.syncedPath(this) ?: return@Runnable
+        thread { runCatching { TaskCleaner.takeInInbox(vault) } }
+    }
+
+    private fun takeInSoon() {
+        handler.removeCallbacks(takeIn)
+        handler.postDelayed(takeIn, 1000)
+    }
+
     private fun watchNotes() {
         handler.removeCallbacks(rewatch)
         if (stopping) return
@@ -135,6 +148,11 @@ class SyncService : Service() {
                 wanted.getOrPut(file.parent ?: continue) { HashMap() }[file.name] = uri
             }
         }
+        // Task Cleaner's folder too, for the widget's inbox of hidden tasks (see TaskCleaner.takeInInbox).
+        val vault = HeadlessSync.syncedPath(this)
+        val cleaner = vault?.let { File(it, ".obsidian/plugins/task-cleaner").path }
+        if (cleaner != null && File(cleaner).isDirectory) wanted.getOrPut(cleaner) { HashMap() }["widget-inbox.json"] = INBOX
+        if (vault != null) thread { runCatching { TaskCleaner.takeInInbox(vault) } }
         for (dir in watchers.keys - wanted.keys) watchers.remove(dir)?.stopWatching()
         for ((dir, files) in wanted) {
             watchers.remove(dir)?.stopWatching()
@@ -142,7 +160,7 @@ class SyncService : Service() {
             val watcher = object : android.os.FileObserver(dir, CLOSE_WRITE or MOVED_TO or CREATE) {
                 override fun onEvent(event: Int, name: String?) {
                     val uri = files[name ?: return] ?: return
-                    NoteWidgetProvider.refreshNote(this@SyncService, uri)
+                    if (uri == INBOX) takeInSoon() else NoteWidgetProvider.refreshNote(this@SyncService, uri)
                 }
             }
             watcher.startWatching()
@@ -153,6 +171,7 @@ class SyncService : Service() {
 
     override fun onDestroy() {
         handler.removeCallbacks(rewatch)
+        handler.removeCallbacks(takeIn)
         watchers.values.forEach { it.stopWatching() }
         watchers.clear()
         stopping = true

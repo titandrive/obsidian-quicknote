@@ -2,6 +2,7 @@ package local.obsidianwidget
 
 import android.content.Context
 import android.provider.DocumentsContract
+import java.io.File
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -178,6 +179,59 @@ object TaskCleaner {
         Vault.write(ctx, file, items.toString())
         true
     }.getOrDefault(false)
+
+    private val INBOX_LOCK = Any()
+
+    /**
+     * With background sync on: takes the widget's inbox into Task Cleaner's settings (data.json), as
+     * Task Cleaner itself does when Obsidian opens. Sync carries data.json but not the inbox, so
+     * otherwise tasks hidden on the widget would reach the other devices' hidden lists only once
+     * Obsidian had been opened on the phone. Each note it changes gets a new "updated" time, so Task
+     * Cleaner elsewhere (merging note by note, the newer winning) takes these lists. "unhide" items
+     * (undone on the widget after being taken in) come off the list. [vaultPath] is the vault folder.
+     */
+    fun takeInInbox(vaultPath: String) = synchronized(INBOX_LOCK) {
+        val dir = File(vaultPath, PLUGIN_DIR)
+        val inbox = File(dir, INBOX)
+        val data = File(dir, "data.json")
+        if (!inbox.exists() || !data.exists()) return@synchronized
+        val items = runCatching { JSONArray(inbox.readText()) }.getOrNull() ?: return@synchronized
+        val settings = runCatching { JSONObject(data.readText()) }.getOrNull() ?: return@synchronized
+        val hidden = settings.optJSONObject("hidden") ?: JSONObject().also { settings.put("hidden", it) }
+        val updated = settings.optJSONObject("updated") ?: JSONObject().also { settings.put("updated", it) }
+        val now = System.currentTimeMillis()
+        fun lines(o: JSONObject) = o.optJSONArray("lines")?.let { a -> (0 until a.length()).map { a.optString(it) } }
+        for (k in 0 until items.length()) {
+            val item = items.optJSONObject(k) ?: continue
+            val path = item.optString("path").ifEmpty { continue }
+            val taken = lines(item) ?: continue
+            when (item.optString("kind")) {
+                "hidden" -> {
+                    val entry = JSONObject(item.toString()).apply {
+                        remove("path")
+                        if (!has("hiddenAt")) put("hiddenAt", now)
+                    }
+                    (hidden.optJSONArray(path) ?: JSONArray().also { hidden.put(path, it) }).put(entry)
+                }
+                "unhide" -> {
+                    val list = hidden.optJSONArray(path) ?: continue
+                    val at = (0 until list.length()).firstOrNull { i ->
+                        val e = list.optJSONObject(i) ?: return@firstOrNull false
+                        e.optString("kind") == "hidden" && e.optInt("at") == item.optInt("at") &&
+                            e.opt("after").toString() == item.opt("after").toString() && lines(e) == taken
+                    } ?: continue
+                    list.remove(at)
+                    if (list.length() == 0) hidden.remove(path)
+                }
+                else -> continue
+            }
+            updated.put(path, now)
+        }
+        // Written whole and swapped in, so Sync and Obsidian never see half a file.
+        val tmp = File(dir, "data.json.tmp")
+        tmp.writeText(settings.toString(2))
+        if (tmp.renameTo(data)) inbox.delete() else tmp.delete()
+    }
 
     /** The line after a task and the lines nested (indented) under it. */
     fun blockEnd(lines: List<String>, at: Int): Int {
