@@ -94,7 +94,7 @@ object NoteRows {
         var size = 0
         for ((i, row) in whole.rows.withIndex()) {
             size += row.image.size + (whole.night?.getOrNull(i)?.image?.size ?: 0)
-            if (size >= NoteWidgetProvider.INLINE_LIMIT) break
+            if (size >= 2 * NoteWidgetProvider.INLINE_LIMIT) break
         }
         memo.edit().putString("sizeKey$slot", key).putInt("size$slot", size).apply()
         return size

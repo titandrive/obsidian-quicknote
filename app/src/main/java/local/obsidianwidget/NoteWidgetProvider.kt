@@ -120,7 +120,8 @@ class NoteWidgetProvider : AppWidgetProvider() {
 
         /**
          * Most a note's rows may add up to and still be sent with the widget. The system passes the
-         * widget on to the launcher in a one-way call, which fails quietly past about 512 KB.
+         * widget on to the launcher in a one-way call, which fails quietly well short of 512 KB: at
+         * about 330 KB the launcher showed nothing of the widget at all.
          */
         const val INLINE_LIMIT = 300_000
 
@@ -218,11 +219,26 @@ class NoteWidgetProvider : AppWidgetProvider() {
             val routes = ctx.getSharedPreferences("routes", Context.MODE_PRIVATE)
             val wasInline = routes.getBoolean("inline$id", false)
             // Handed over with the update only if that keeps the whole update within its budget.
-            val items = if (rows != null && android.os.Build.VERSION.SDK_INT >= 31 && NoteRows.wholeSize(ctx, id) < INLINE_LIMIT) {
-                val builder = RemoteViews.RemoteCollectionItems.Builder().setHasStableIds(true).setViewTypeCount(1)
-                val ids = NoteRows.ids(rows.rows)
-                rows.rows.forEachIndexed { i, row -> builder.addItem(ids[i], NoteRows.view(ctx, row, rows.night?.getOrNull(i), cfg.readOnly)) }
-                builder.build().takeIf { parcelSize(it) + parcelSize(views) < UPDATE_BUDGET }
+            // Fetching rows instead (the list service) left the list blank on some launchers, so
+            // that's only for notes too long to send any other way: when the light and dark rows
+            // together don't fit, the rows for the theme the phone is in now go on their own, and
+            // the next redraw after the theme changes brings the other.
+            val whole = if (rows != null && android.os.Build.VERSION.SDK_INT >= 31) NoteRows.wholeSize(ctx, id) else Int.MAX_VALUE
+            val items = if (rows != null && android.os.Build.VERSION.SDK_INT >= 31) {
+                val base = parcelSize(views)
+                fun items(list: List<NoteRows.Row>, night: List<NoteRows.Row>?): RemoteViews.RemoteCollectionItems? {
+                    val builder = RemoteViews.RemoteCollectionItems.Builder().setHasStableIds(true).setViewTypeCount(1)
+                    val ids = NoteRows.ids(list)
+                    list.forEachIndexed { i, row -> builder.addItem(ids[i], NoteRows.view(ctx, row, night?.getOrNull(i), cfg.readOnly)) }
+                    return builder.build().takeIf { parcelSize(it) + base < UPDATE_BUDGET }
+                }
+                val night = rows.night
+                when {
+                    whole < INLINE_LIMIT -> items(rows.rows, night)
+                    // One theme's rows are half of both.
+                    night != null && whole < 2 * INLINE_LIMIT -> items(if (cfg.isDark(ctx)) night else rows.rows, null)
+                    else -> null
+                }
             } else null
             if (items != null && android.os.Build.VERSION.SDK_INT >= 31) {
                 views.setRemoteAdapter(R.id.list, items)
