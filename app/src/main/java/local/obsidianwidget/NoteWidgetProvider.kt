@@ -44,6 +44,8 @@ class NoteWidgetProvider : AppWidgetProvider() {
             Intent.ACTION_MY_PACKAGE_REPLACED -> {
                 ChangeCheck.scheduleAll(ctx)
                 refresh(ctx, allIds(ctx))
+                // An update stops background sync, and Android doesn't start it again.
+                if (HeadlessSync.enabled(ctx)) runCatching { SyncService.start(ctx) }
             }
             else -> super.onReceive(ctx, intent)
         }

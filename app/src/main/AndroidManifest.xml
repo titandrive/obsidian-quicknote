@@ -10,6 +10,14 @@
         android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
         tools:ignore="ScopedStorage" />
 
+    <!-- Background sync: Obsidian Headless talks to Obsidian Sync, kept running as a foreground service. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+
     <!-- The light tick on taps. -->
     <uses-permission android:name="android.permission.VIBRATE" />
 
@@ -81,6 +89,28 @@
             <meta-data
                 android:name="android.appwidget.provider"
                 android:resource="@xml/note_widget_info" />
+        </receiver>
+
+        <activity
+            android:name=".SyncActivity"
+            android:exported="false" />
+
+        <!-- Runs Obsidian Headless; "special use" since it syncs all day, past the limit on data sync services. -->
+        <service
+            android:name=".SyncService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Keeps an Obsidian vault in sync with Obsidian Sync while Obsidian is closed" />
+        </service>
+
+        <receiver
+            android:name=".SyncBootReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
         </receiver>
 
         <service

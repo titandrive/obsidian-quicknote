@@ -115,6 +115,14 @@ class MainActivity : ComponentActivity() {
                                 onClick = { pickVault.launch(null) },
                             )
                         }
+
+                        SectionCard("Background sync", R.drawable.ic_refresh) {
+                            NavRow(
+                                title = if (HeadlessSync.enabled(this@MainActivity)) "On" else "Off",
+                                subtitle = "Sync widget edits while Obsidian is closed",
+                                onClick = { startActivity(android.content.Intent(this@MainActivity, SyncActivity::class.java)) },
+                            )
+                        }
                     }
                 }
             }

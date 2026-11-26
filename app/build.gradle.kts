@@ -46,6 +46,14 @@ android {
         additionalParameters += listOf("--stable-ids", file("stable-ids.txt").path)
     }
 
+    // Node for background sync is run straight from the app's native libraries, so they're
+    // unpacked on install rather than kept compressed in the APK.
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
+        }
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -64,3 +72,12 @@ dependencies {
     implementation("androidx.work:work-runtime-ktx:2.11.2")
     implementation("androidx.profileinstaller:profileinstaller:1.4.1")
 }
+
+// Node.js for background sync (Termux's Android build), fetched rather than kept in git. See
+// tools/fetch_node.py; delete app/src/main/jniLibs to fetch the latest again.
+val nodeLibs = file("src/main/jniLibs/arm64-v8a")
+val fetchNode by tasks.registering(Exec::class) {
+    onlyIf { !File(nodeLibs, "libobnode.so").exists() }
+    commandLine("python3", rootProject.file("tools/fetch_node.py").path, nodeLibs.path)
+}
+tasks.named("preBuild") { dependsOn(fetchNode) }

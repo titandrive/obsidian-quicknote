@@ -3,3 +3,4 @@ build/
 local.properties
 *.apk
 .idea/
+app/src/main/jniLibs/
