@@ -104,15 +104,21 @@ class LivePreview(
      * Styles each line on its own, reusing lines styled before, so typing in a long note only
      * restyles the line being edited rather than the whole note on every keystroke.
      */
+    /** The lines given space above them (headings after text), as last annotated: their text sits at the bottom of the line. */
+    val gaps = HashSet<Int>()
+
     fun annotate(text: String): AnnotatedString {
         val lines = text.split('\n')
         val out = AnnotatedString.Builder(text.length)
         val cut = ArrayList<Int>()
         // Each shown line's paragraph styles (callouts), applied once its line break is in, so they
         // take it in: one that stopped short left the break a paragraph of its own, an empty line.
+        gaps.clear()
         var pending: List<AnnotatedString.Range<ParagraphStyle>> = emptyList()
         var pendingStart = 0
         var shownAny = false
+        // Whether the line shown last was blank (or nothing's shown yet), for the space above headings.
+        var lastBlank = true
         var ctx = Ctx(null, lines.firstOrNull()?.trim() == "---", null, false, true)
         var offset = 0
         for ((i, raw) in lines.withIndex()) {
@@ -133,6 +139,23 @@ class LivePreview(
             } else {
                 // The line break before this line, which belongs to the line shown before it.
                 if (shownAny) out.append('\n')
+                // Space above a heading with text right before it, as Obsidian (and the widget) has:
+                // the line break before it made a short line of its own. (A break at the edge of a
+                // paragraph with a style of its own shows as an empty line that paragraph's height;
+                // here that's the point.) Not after a line with styles of its own, a callout's say.
+                val level = if (!source && tableRows[i] == null && ctx.fence == null && !ctx.frontMatter && Markdown.HEADING.matches(line)) line.takeWhile { it == '#' }.length else 0
+                if (level > 0 && shownAny && !lastBlank && pending.isEmpty()) {
+                    out.addStyle(
+                        ParagraphStyle(
+                            // It shows as two lines of this height.
+                            lineHeight = (HEADING_GAP / 2).em,
+                            lineHeightStyle = LineHeightStyle(LineHeightStyle.Alignment.Center, LineHeightStyle.Trim.None),
+                            platformStyle = androidx.compose.ui.text.PlatformParagraphStyle(includeFontPadding = false),
+                        ),
+                        out.length - 1, out.length,
+                    )
+                    gaps.add(i)
+                }
                 for (ps in pending) out.addStyle(ps.item, pendingStart + ps.start, out.length)
                 shownAny = true
                 pendingStart = out.length
@@ -151,6 +174,7 @@ class LivePreview(
                     if (raw.length > line.length) out.append("\r")
                     pending = styled.text.paragraphStyles
                 }
+                lastBlank = line.isBlank()
             }
             ctx = styled.next.copy(first = false)
             offset += raw.length + 1
@@ -397,6 +421,8 @@ class LivePreview(
     companion object {
         /** The editor's line height, in ems. */
         const val LINE_HEIGHT = 1.45f
+        /** The space above a heading that follows text, in ems, as the widget leaves it. */
+        const val HEADING_GAP = 0.6f
         /** A callout's padding (top, and left of its text), its icon and the gap after it, in ems: Obsidian's CSS pixels for 16px text. */
         const val CALLOUT_PAD = 0.75f
         const val CALLOUT_LEFT = 1.5f
