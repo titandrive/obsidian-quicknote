@@ -73,6 +73,8 @@ class SyncService : Service() {
             worker = thread(name = "headless-sync") { loop(path) }
         }
         watchNotes()
+        handler.removeCallbacks(heartbeat)
+        handler.post(heartbeat)
         return START_STICKY
     }
 
@@ -102,10 +104,58 @@ class SyncService : Service() {
     private val logLock = Any()
 
     private fun log(line: String) = synchronized(logLock) {
+        status(line)
         val file = HeadlessSync.log(this)
         val stamp = java.text.SimpleDateFormat("MMM d HH:mm:ss", java.util.Locale.US).format(java.util.Date())
         val lines = (if (file.exists()) file.readLines() else emptyList()) + "$stamp  $line"
         file.writeText(lines.takeLast(LOG_LINES).joinToString("\n") + "\n")
+    }
+
+    /*
+     * Sync's status for Obsidian on the phone (the QuickNote Sync Status plugin shows it where Sync's
+     * own icon goes): "synced", "working", "error" or "paused", read from what Headless prints, in
+     * .obsidian/quicknote-sync.status. Neither Sync client carries a file by that name, so it stays
+     * on the phone. Written again every minute with its time, so a stale one means sync isn't
+     * running.
+     */
+    @Volatile
+    private var state = "working"
+    @Volatile
+    private var detail = ""
+
+    private fun status(line: String) {
+        val next = when {
+            line.startsWith("Fully synced") -> "synced"
+            line.startsWith("Disconnected") || line.startsWith("Sync error") || line.startsWith("Sync failed") ||
+                line.startsWith("Couldn't run") || line.startsWith("Sync stopped") -> "error"
+            line.startsWith("Starting sync") || line.startsWith("Connect") || line.startsWith("Scanning") ||
+                line.startsWith("Uploading") || line.startsWith("Downloading") || line.startsWith("Deleting") ||
+                line.startsWith("Merg") || line.startsWith("Renaming") -> "working"
+            else -> return
+        }
+        if (next == state && line == detail) return
+        state = next
+        detail = line
+        writeStatus()
+    }
+
+    private fun writeStatus(paused: Boolean = false) {
+        val vault = HeadlessSync.syncedPath(this) ?: return
+        runCatching {
+            val json = org.json.JSONObject()
+                .put("state", if (paused) "paused" else state)
+                .put("detail", if (paused) "Background sync is off" else detail)
+                .put("at", System.currentTimeMillis())
+            File(vault, ".obsidian/quicknote-sync.status").writeText(json.toString())
+        }
+    }
+
+    private val heartbeat = object : Runnable {
+        override fun run() {
+            if (stopping) return
+            thread { writeStatus() }
+            handler.postDelayed(this, 60_000)
+        }
     }
 
     /*
@@ -171,6 +221,9 @@ class SyncService : Service() {
     }
 
     override fun onDestroy() {
+        handler.removeCallbacks(heartbeat)
+        // Turned off (rather than killed): Obsidian shows it as paused.
+        if (!HeadlessSync.enabled(this)) thread { writeStatus(paused = true) }
         handler.removeCallbacks(rewatch)
         handler.removeCallbacks(takeIn)
         watchers.values.forEach { it.stopWatching() }
