@@ -195,7 +195,10 @@ object NoteRows {
                     val l = layout(b.text, width - 2 * pad)
                     Piece(b, l, y, l.height + 2 * dp(ctx, 6), pad)
                 }
-                else -> layout(b.text, width).let { Piece(b, it, y, it.height, 0) }
+                else -> layout(b.text, width).let {
+                    val above = if (b.gap) (paint.textSize * 0.6f).toInt() else 0
+                    Piece(b, it, y, above + it.height, 0, textTop = above)
+                }
             }.also { synchronized(layouts) { layouts[sig] = it } }
             pieces.add(piece)
             sigs.add(sig)
@@ -533,7 +536,7 @@ object NoteRows {
             }
         }
         styled(b.text)
-        sb.append(b.task).append(b.code).append(b.rule).append(b.fold).append('r').append(b.reset)
+        sb.append(b.task).append(b.code).append(b.rule).append(b.fold).append('r').append(b.reset).append('g').append(b.gap)
         b.callout?.let { sb.append('c').append(it.color).append(it.icon).append(it.last) }
         b.table?.let { t -> sb.append('t').append(t.align); t.rows.forEach { row -> row.forEach(::styled); sb.append('\u0003') } }
         // 64 bits of SHA-1, so two different blocks don't share a layout by chance.

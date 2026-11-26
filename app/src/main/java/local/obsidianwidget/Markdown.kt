@@ -38,9 +38,11 @@ class Block(
     val callout: CalloutLine? = null,
     /** A Task Resetter button on this line: [NONE], [RESET_SECTION] or [RESET_ALL]. */
     val reset: Int = NONE,
+    /** Space above it: a heading with text right before it, spaced as Obsidian spaces headings. */
+    val gap: Boolean = false,
 ) {
     fun copy(text: CharSequence = this.text, fold: Int = this.fold, callout: CalloutLine? = this.callout, reset: Int = this.reset) =
-        Block(text, line, task, code, rule, table, fold, callout, reset)
+        Block(text, line, task, code, rule, table, fold, callout, reset, gap)
 
     companion object {
         const val NONE = 0
@@ -330,7 +332,10 @@ object Markdown {
                         for (b in sb.getSpans(0, sb.length, ResetSpan::class.java)) {
                             sb.setSpan(RelativeSizeSpan(1f / scale), sb.getSpanStart(b), sb.getSpanEnd(b), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
                         }
-                        Block(sb, i)
+                        // Obsidian puts space above a heading, so sections look apart even with no
+                        // blank line between them; a blank line before it already does that here.
+                        val prev = out.lastOrNull()
+                        Block(sb, i, gap = prev != null && !(prev.text.isBlank() && !prev.rule))
                     }
                     TASK.matches(line) -> {
                         val m = TASK.find(line)!!
