@@ -82,6 +82,7 @@ class SyncService : Service() {
         while (!stopping) {
             val started = System.currentTimeMillis()
             log("Starting sync")
+            if (!HeadlessSync.patch(this)) log("This Headless version's sync loop isn't the one QuickNote patches: it may use more battery")
             runCatching {
                 val p = HeadlessSync.command(this, "sync", "--continuous", "--path", path).start()
                 process = p

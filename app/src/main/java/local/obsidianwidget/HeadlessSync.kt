@@ -69,12 +69,47 @@ object HeadlessSync {
             val dep = JSONObject(URL("$REGISTRY$name/${deps.getString(name)}").readText())
             unpack(dep.getJSONObject("dist").getString("tarball"), File(modules, name))
         }
+        patch(ctx)
         File(modules, "better-sqlite3").apply {
             deleteRecursively()
             mkdirs()
             File(this, "package.json").writeText("""{"name":"better-sqlite3","main":"index.js"}""")
             File(this, "index.js").writeText(ctx.assets.open("headless/better-sqlite3.js").bufferedReader().readText())
         }
+    }
+
+    // Headless's sync loop runs pass after pass while it waits for recently changed files to
+    // settle (10 to 30 seconds), with no pause between passes once the network is quiet: each local
+    // change kept Node busy for up to half a minute (profiled: about 55% of a core). This pauses a
+    // second between those passes; passes right after network activity stay as quick as before.
+    private const val PAUSE_MS = 1000
+
+    private val BUSY_WAIT = Regex(
+        "let (\\w+)=0;if\\(this\\.server\\)\\{let (\\w+)=Date\\.now\\(\\)-this\\.server\\.lastNetworkRequestTs;\\1=Math\\.max\\(0,50-\\2\\)\\}await (\\w+)\\(\\1\\)",
+    )
+
+    /**
+     * Patches the downloaded Headless (see [BUSY_WAIT]); done again before each start, so a copy
+     * downloaded before the patch existed gets it too. False if this version's loop isn't the
+     * one it knows, and it runs unpatched.
+     */
+    fun patch(ctx: Context): Boolean {
+        val file = cli(ctx)
+        val source = runCatching { file.readText() }.getOrNull() ?: return false
+        if (source.contains(">2000?$PAUSE_MS:Math.max(0,50-")) return true
+        // Patched before with another pause: just the pause changes.
+        Regex(">2000\\?\\d+:Math\\.max\\(0,50-").find(source)?.let {
+            file.writeText(source.replaceRange(it.range, ">2000?$PAUSE_MS:Math.max(0,50-"))
+            return true
+        }
+        val match = BUSY_WAIT.find(source) ?: return false
+        val (t, i, wait) = match.destructured
+        val patched = source.replaceRange(
+            match.range,
+            "let $t=0;if(this.server){let $i=Date.now()-this.server.lastNetworkRequestTs;$t=$i>2000?$PAUSE_MS:Math.max(0,50-$i)}await $wait($t)",
+        )
+        file.writeText(patched)
+        return true
     }
 
     /** Unpacks an npm package (a .tgz with everything under "package/") into [dir]. */
