@@ -145,6 +145,9 @@ class EditorActivity : ComponentActivity() {
             NoteWidgetProvider.refreshNote(ctx, cfg.noteUri)
         }
 
+        /** The widget's Undo for tasks Task Cleaner just hid or deleted. */
+        fun undoTaskCleaner(ctx: Context, cfg: WidgetConfig) = runCatching { TaskCleaner.undo(ctx, cfg, TICKS) }
+
         private val TICKS = Any()
     }
 

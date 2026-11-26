@@ -60,6 +60,16 @@
                 android:textSize="16.5sp"
                 android:textStyle="bold" />
 
+            <!-- For a few seconds after Task Cleaner hides or deletes a task ticked here: puts it back. -->
+            <ImageView
+                android:id="@+id/btn_undo"
+                android:layout_width="38dp"
+                android:layout_height="38dp"
+                android:padding="9dp"
+                android:src="@drawable/ic_undo"
+                android:visibility="gone"
+                android:contentDescription="@string/undo" />
+
             <ImageView
                 android:id="@+id/btn_read"
                 android:layout_width="38dp"

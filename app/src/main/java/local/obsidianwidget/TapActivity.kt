@@ -26,6 +26,8 @@ class TapActivity : Activity() {
         const val EXTRA_READ = "read"
         /** A Task Resetter button: [Block.RESET_SECTION] or [Block.RESET_ALL], with its line. */
         const val EXTRA_RESET = "reset"
+        /** Puts back the tasks Task Cleaner just hid or deleted. */
+        const val EXTRA_UNDO = "undo"
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -72,6 +74,13 @@ class TapActivity : Activity() {
                 thread {
                     val cfg = WidgetStore.load(app, id) ?: return@thread
                     EditorActivity.resetTasks(app, cfg, line, whole)
+                }
+            }
+            intent.getBooleanExtra(EXTRA_UNDO, false) -> {
+                val app = applicationContext
+                thread {
+                    val cfg = WidgetStore.load(app, id) ?: return@thread
+                    EditorActivity.undoTaskCleaner(app, cfg)
                 }
             }
             forward != null -> runCatching { startActivity(forward) }

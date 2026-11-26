@@ -55,9 +55,94 @@ object TaskCleaner {
                 val taken = takeOut(now, text.split('\n')[line], line) ?: return@thread
                 if (settings.hide && !addToInbox(app, cfg, taken)) return@thread
                 Vault.write(app, cfg.uri, taken.text)
+                offerUndo(app, cfg, taken, settings.hide)
             }
             NoteWidgetProvider.refreshNote(app, cfg.noteUri)
+            // The Undo button goes once its time is up.
+            Thread.sleep(UNDO_MS + 100)
+            NoteWidgetProvider.refreshNote(app, cfg.noteUri)
         }
+    }
+
+    /** How long the widget offers Undo after a task is hidden or deleted, as Task Cleaner's notice does. */
+    const val UNDO_MS = 5000L
+
+    private fun undoPrefs(ctx: Context) = ctx.getSharedPreferences("task-cleaner-undo", Context.MODE_PRIVATE)
+
+    /** Keeps what was just taken out of the note, for the widget's Undo button; tasks taken out while it's up share it. */
+    private fun offerUndo(ctx: Context, cfg: WidgetConfig, taken: Taken, hide: Boolean) {
+        val prefs = undoPrefs(ctx)
+        val now = System.currentTimeMillis()
+        val old = prefs.getString(cfg.noteUri, null)?.let { runCatching { JSONObject(it) }.getOrNull() }
+        val items = old?.takeIf { it.optLong("until") > now }?.optJSONArray("items") ?: JSONArray()
+        items.put(JSONObject().put("lines", JSONArray(taken.lines)).put("after", taken.after ?: JSONObject.NULL).put("at", taken.at))
+        prefs.edit().putString(cfg.noteUri, JSONObject().put("until", now + UNDO_MS).put("hide", hide).put("items", items).toString()).apply()
+    }
+
+    /** Whether the widget's note has tasks just taken out that Undo can put back. */
+    fun canUndo(ctx: Context, noteUri: String): Boolean =
+        undoPrefs(ctx).getString(noteUri, null)?.let { runCatching { JSONObject(it).optLong("until") > System.currentTimeMillis() }.getOrNull() } ?: false
+
+    private val CHECKED = Regex("^(\\s*(?:[-*+]|\\d+[.)])\\s+\\[)[xX](])")
+
+    /**
+     * The widget's Undo: puts the tasks just taken out back in the note where they were, unchecked,
+     * as Task Cleaner's Undo does. Hidden ones come out of the inbox, or, if Task Cleaner has taken
+     * them in already, the inbox tells it to drop them.
+     */
+    fun undo(ctx: Context, cfg: WidgetConfig, lock: Any) {
+        val prefs = undoPrefs(ctx)
+        val record = prefs.getString(cfg.noteUri, null)?.let { runCatching { JSONObject(it) }.getOrNull() } ?: return
+        prefs.edit().remove(cfg.noteUri).apply()
+        if (record.optLong("until") <= System.currentTimeMillis()) return
+        val items = record.optJSONArray("items") ?: return
+        val taken = (0 until items.length()).map { k ->
+            val o = items.getJSONObject(k)
+            val lines = o.getJSONArray("lines").let { a -> (0 until a.length()).map { a.getString(it) } }
+            Taken("", lines, if (o.isNull("after")) null else o.getString("after"), o.getInt("at"))
+        }
+        synchronized(lock) {
+            val text = Vault.read(ctx, cfg.uri) ?: return
+            val body = text.split('\n').toMutableList()
+            for (t in taken.asReversed()) {
+                val lines = listOf(CHECKED.replace(t.lines[0], "$1 $2")) + t.lines.drop(1)
+                body.addAll(placeFor(body, t), lines)
+            }
+            Vault.write(ctx, cfg.uri, body.joinToString("\n"))
+            if (record.optBoolean("hide")) unhide(ctx, cfg, taken)
+        }
+        NoteWidgetProvider.refreshNote(ctx, cfg.noteUri)
+    }
+
+    /** Where a task goes back: under its "after" line (the copy nearest where it was), or where it was if that's gone. */
+    private fun placeFor(body: List<String>, t: Taken): Int {
+        val after = t.after ?: return 0
+        val best = body.indices.filter { body[it] == after }.minByOrNull { kotlin.math.abs(it - (t.at - 1)) }
+        return if (best != null) blockEnd(body, best) else minOf(t.at, body.size)
+    }
+
+    /** Takes undone tasks out of the inbox; ones Task Cleaner already took in are listed there for it to drop. */
+    private fun unhide(ctx: Context, cfg: WidgetConfig, taken: List<Taken>) = runCatching {
+        val tree = cfg.vaultTree
+        val file = Vault.find(ctx, tree, "$PLUGIN_DIR/$INBOX") ?: run {
+            val dir = Vault.find(ctx, tree, PLUGIN_DIR) ?: return@runCatching
+            DocumentsContract.createDocument(ctx.contentResolver, dir, "application/octet-stream", INBOX) ?: return@runCatching
+        }
+        val items = Vault.read(ctx, file)?.takeIf { it.isNotBlank() }?.let { runCatching { JSONArray(it) }.getOrNull() } ?: JSONArray()
+        for (t in taken) {
+            val k = (0 until items.length()).firstOrNull { k ->
+                val o = items.getJSONObject(k)
+                o.optString("kind") == "hidden" && o.optString("path") == cfg.notePath && o.optInt("at") == t.at &&
+                    (if (o.isNull("after")) null else o.optString("after")) == t.after &&
+                    o.optJSONArray("lines")?.let { a -> (0 until a.length()).map { a.getString(it) } } == t.lines
+            }
+            if (k != null) items.remove(k)
+            else items.put(
+                JSONObject().put("path", cfg.notePath).put("kind", "unhide")
+                    .put("after", t.after ?: JSONObject.NULL).put("at", t.at).put("lines", JSONArray(t.lines)),
+            )
+        }
+        Vault.write(ctx, file, items.toString())
     }
 
     /** A task taken out of a note: the note without it, its lines, and where it was. */
