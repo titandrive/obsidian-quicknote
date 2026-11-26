@@ -25,7 +25,7 @@ object TaskCleaner {
     private const val PLUGIN_DIR = ".obsidian/plugins/task-cleaner"
     private const val INBOX = "widget-inbox.json"
 
-    class Settings(val hide: Boolean, val delayMs: Long, val skipResetNotes: Boolean)
+    class Settings(val hide: Boolean, val delayMs: Long, val skipResetNotes: Boolean, val undoMs: Long)
 
     /** Task Cleaner's settings, or null if it isn't in the vault. */
     fun settings(ctx: Context, cfg: WidgetConfig): Settings? {
@@ -34,6 +34,7 @@ object TaskCleaner {
             hide = json.optString("action", "hide") != "delete",
             delayMs = json.optLong("delayMs", 500),
             skipResetNotes = json.optBoolean("skipResetNotes", true),
+            undoMs = json.optLong("undoMs", UNDO_MS),
         )
     }
 
@@ -56,28 +57,30 @@ object TaskCleaner {
                 val taken = takeOut(now, text.split('\n')[line], line) ?: return@thread
                 if (settings.hide && !addToInbox(app, cfg, taken)) return@thread
                 Vault.write(app, cfg.uri, taken.text)
-                offerUndo(app, cfg, taken, settings.hide)
+                if (settings.undoMs > 0) offerUndo(app, cfg, taken, settings.hide, settings.undoMs)
             }
             NoteWidgetProvider.refreshNote(app, cfg.noteUri)
             // The Undo button goes once its time is up.
-            Thread.sleep(UNDO_MS + 100)
-            NoteWidgetProvider.refreshNote(app, cfg.noteUri)
+            if (settings.undoMs > 0) {
+                Thread.sleep(settings.undoMs + 100)
+                NoteWidgetProvider.refreshNote(app, cfg.noteUri)
+            }
         }
     }
 
-    /** How long the widget offers Undo after a task is hidden or deleted, as Task Cleaner's notice does. */
+    /** How long the widget offers Undo after a task is hidden or deleted, unless Task Cleaner's Undo setting says otherwise. */
     const val UNDO_MS = 5000L
 
     private fun undoPrefs(ctx: Context) = ctx.getSharedPreferences("task-cleaner-undo", Context.MODE_PRIVATE)
 
     /** Keeps what was just taken out of the note, for the widget's Undo button; tasks taken out while it's up share it. */
-    private fun offerUndo(ctx: Context, cfg: WidgetConfig, taken: Taken, hide: Boolean) {
+    private fun offerUndo(ctx: Context, cfg: WidgetConfig, taken: Taken, hide: Boolean, undoMs: Long) {
         val prefs = undoPrefs(ctx)
         val now = System.currentTimeMillis()
         val old = prefs.getString(cfg.noteUri, null)?.let { runCatching { JSONObject(it) }.getOrNull() }
         val items = old?.takeIf { it.optLong("until") > now }?.optJSONArray("items") ?: JSONArray()
         items.put(JSONObject().put("lines", JSONArray(taken.lines)).put("after", taken.after ?: JSONObject.NULL).put("at", taken.at))
-        prefs.edit().putString(cfg.noteUri, JSONObject().put("until", now + UNDO_MS).put("hide", hide).put("items", items).toString()).apply()
+        prefs.edit().putString(cfg.noteUri, JSONObject().put("until", now + undoMs).put("hide", hide).put("items", items).toString()).apply()
     }
 
     /** Whether the widget's note has tasks just taken out that Undo can put back. */
