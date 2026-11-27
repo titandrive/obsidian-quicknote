@@ -508,36 +508,10 @@ object Markdown {
      */
     fun resetTasks(src: String, line: Int, whole: Boolean, other: Boolean): String? {
         val lines = src.split('\n').toMutableList()
-        val fenced = BooleanArray(lines.size)
-        var inFence = false
-        for (k in lines.indices) {
-            val marker = FENCE.containsMatchIn(lines[k])
-            if (marker) inFence = !inFence
-            fenced[k] = inFence || marker
-        }
-        fun level(k: Int) = if (fenced[k]) 0 else HEADING_START.find(lines[k])?.groupValues?.get(1)?.length ?: 0
-        val ranges = mutableListOf<IntRange>()
-        fun section(h: Int) {
-            val end = (h + 1 until lines.size).firstOrNull { level(it) in 1..level(h) } ?: lines.size
-            ranges.add(h + 1 until end)
-        }
+        val fenced = fenced(lines)
         val mark = lines.getOrNull(line)?.let { l -> RESET_MARK.findAll(l).firstNotNullOfOrNull(::marker) }
-        val all = mark?.all ?: whole
-        val byLevel = mark?.level ?: 0
-        val byName = mark?.name?.lowercase().orEmpty()
-        when {
-            all || lines.isEmpty() -> ranges.add(lines.indices)
-            byLevel > 0 -> for (k in lines.indices) if (level(k) == byLevel) section(k)
-            byName.isNotEmpty() -> for (k in lines.indices) if (level(k) > 0 && headingText(lines[k]) == byName) section(k)
-            else -> {
-                var own = -1
-                var k = minOf(line, lines.size - 1)
-                while (k >= 0 && own < 0) { if (level(k) > 0) own = k; k-- }
-                if (own >= 0) section(own) else ranges.add(lines.indices)
-            }
-        }
         var changed = false
-        for (k in ranges.flatten().toSortedSet()) {
+        for (k in resetRange(lines, fenced, line, mark, whole).sorted()) {
             if (fenced[k]) continue
             val m = RESET_BOX.find(lines[k]) ?: continue
             val mark = m.groupValues[2]
@@ -549,6 +523,61 @@ object Markdown {
     }
 
     private val HEADING_START = Regex("^(#{1,6})\\s")
+
+    /** Which lines are in (or open or close) a code block. */
+    private fun fenced(lines: List<String>): BooleanArray {
+        val fenced = BooleanArray(lines.size)
+        var inFence = false
+        for (k in lines.indices) {
+            val marker = FENCE.containsMatchIn(lines[k])
+            if (marker) inFence = !inFence
+            fenced[k] = inFence || marker
+        }
+        return fenced
+    }
+
+    /** The lines the button on [line] (marker [mark], or the whole note if [whole] and it has none) resets; see [resetTasks]. */
+    private fun resetRange(lines: List<String>, fenced: BooleanArray, line: Int, mark: Marker?, whole: Boolean): Set<Int> {
+        fun level(k: Int) = if (fenced[k]) 0 else HEADING_START.find(lines[k])?.groupValues?.get(1)?.length ?: 0
+        val out = HashSet<Int>()
+        fun section(h: Int) {
+            val end = (h + 1 until lines.size).firstOrNull { level(it) in 1..level(h) } ?: lines.size
+            out.addAll(h + 1 until end)
+        }
+        val byLevel = mark?.level ?: 0
+        val byName = mark?.name?.lowercase().orEmpty()
+        when {
+            mark?.all ?: whole || lines.isEmpty() -> out.addAll(lines.indices)
+            byLevel > 0 -> for (k in lines.indices) if (level(k) == byLevel) section(k)
+            byName.isNotEmpty() -> for (k in lines.indices) if (level(k) > 0 && headingText(lines[k]) == byName) section(k)
+            else -> {
+                var own = -1
+                var k = minOf(line, lines.size - 1)
+                while (k >= 0 && own < 0) { if (level(k) > 0) own = k; k-- }
+                if (own >= 0) section(own) else out.addAll(lines.indices)
+            }
+        }
+        return out
+    }
+
+    /**
+     * Every line some Task Resetter button in [src] resets (as [resetTasks] decides for each), so
+     * Task Cleaner leaves those checklists alone.
+     */
+    fun resetCovered(src: String): Set<Int> {
+        val lines = src.split('\n')
+        val fenced = fenced(lines)
+        val out = HashSet<Int>()
+        for (k in lines.indices) {
+            if (fenced[k]) continue
+            val line = lines[k]
+            val mark = RESET_MARK.findAll(line)
+                .filter { line.substring(0, it.range.first).count { c -> c == '`' } % 2 == 0 }
+                .firstNotNullOfOrNull(::marker) ?: continue
+            out.addAll(resetRange(lines, fenced, k, mark, false))
+        }
+        return out
+    }
 
     /** A table row's cells: split on pipes that aren't escaped, without the ones at the ends. */
     private fun cells(row: String): List<String> =
