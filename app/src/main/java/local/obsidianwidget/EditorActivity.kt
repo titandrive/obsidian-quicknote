@@ -69,6 +69,8 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -438,7 +440,26 @@ class EditorActivity : ComponentActivity() {
             grids.flatMap { g -> g.hs.indices.map { r -> g.table.line(r) to with(density) { g.hs[r].toSp() } } }.toMap()
         }
         val tableRules = remember(grids) { grids.map { it.table.start + 1 }.toSet() }
-        val preview = remember(active, cursor, collapsed, tableRows, sourceMode) { LivePreview(p, cfg.textSize, active, cursor, collapsed, tableRows, tableRules, sourceMode) }
+        // Task Resetter's buttons, drawn over their hidden markers as the plugin draws them: with its
+        // label hidden or not, and faded when there's nothing to reset, as it's set.
+        var resetSettings by remember { mutableStateOf<org.json.JSONObject?>(null) }
+        LaunchedEffect(Unit) {
+            resetSettings = withContext(Dispatchers.IO) { runCatching { TaskResetter.settings(this@EditorActivity, cfg.vaultTree) }.getOrNull() }
+        }
+        val resetIconOnly = resetSettings?.optBoolean("hideLabel") ?: false
+        val buttonPaint = remember {
+            android.text.TextPaint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                typeface = Fonts.typeface(cfg.fontFile)
+                textSize = with(density) { cfg.textSize.sp.toPx() }
+            }
+        }
+        val buttonWidth: (Markdown.Marker) -> Float = remember(resetIconOnly) {
+            val probe = android.text.TextPaint(buttonPaint).apply { textSize = 100f };
+            { mk: Markdown.Marker -> (Markdown.resetSpan(mk, p, resetIconOnly).getSize(probe, null, 0, 0, null) - probe.measureText("[")) / 100f }
+        }
+        val preview = remember(active, cursor, collapsed, tableRows, sourceMode, buttonWidth) {
+            LivePreview(p, cfg.textSize, active, cursor, collapsed, tableRows, tableRules, sourceMode, buttonWidth)
+        }
         val callouts = remember(value.text, collapsed, sourceMode) { if (sourceMode) emptyList() else LivePreview.calloutBoxes(value.text, p, collapsed) }
         val gutter = with(density) { 22.dp.toPx() }
         val tick = rememberHaptic()
@@ -540,6 +561,24 @@ class EditorActivity : ComponentActivity() {
                                 val l = layout ?: return@drawBehind
                                 val text = value.text
                                 drawCallouts(l, text, preview, callouts, padTop, with(density) { 22.dp.toPx() }, size.width - with(density) { 18.dp.toPx() }, with(density) { cfg.textSize.sp.toPx() }, p)
+                                // Task Resetter's buttons, in the room left for them by their markers.
+                                val dimEmpty = resetSettings?.optBoolean("dimWhenEmpty", true) ?: false
+                                val other = resetSettings?.optBoolean("clearOtherMarkers") ?: false
+                                drawIntoCanvas { c ->
+                                    for ((at, mk) in preview.buttons) {
+                                        val s = preview.toShown(at)
+                                        if (s >= l.layoutInput.text.length) continue
+                                        val line = l.getLineForOffset(s)
+                                        val span = Markdown.resetSpan(mk, p, resetIconOnly)
+                                        span.getSize(buttonPaint, null, 0, 0, null)
+                                        if (dimEmpty) span.dim = Markdown.resetTasks(text, text.substring(0, at).count { it == '\n' }, mk.all, other) == null
+                                        span.draw(
+                                            c.nativeCanvas, null, 0, 0, gutter + l.getBoundingBox(s).left,
+                                            (padTop + l.getLineTop(line)).toInt(), (padTop + l.getLineBaseline(line)).toInt(), (padTop + l.getLineBottom(line)).toInt(),
+                                            buttonPaint,
+                                        )
+                                    }
+                                }
                                 // Tables as grids: the header shaded, one-pixel lines in the faint colour.
                                 for (g in grids) {
                                     val y0 = gridTop(l, text, preview, g, padTop) ?: continue

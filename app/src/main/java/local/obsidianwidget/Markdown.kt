@@ -466,12 +466,17 @@ object Markdown {
 
     /** Task Resetter's button, one character drawn by a [ResetSpan]. */
     private fun button(mk: Marker, p: Palette): SpannableStringBuilder {
+        val span = resetSpan(mk, p, iconOnly.get() == true)
+        return SpannableStringBuilder("\uFFFC").also { it.setSpan(span, 0, 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE) }
+    }
+
+    /** Marker [mk]'s button as the plugin draws it; the editor draws it too. */
+    fun resetSpan(mk: Marker, p: Palette, iconOnly: Boolean): ResetSpan {
         val path = mk.icon?.let { if (it == "rotate-ccw-square") null else LucideIcons.data(it) }
-        val span = ResetSpan(
-            mk.label ?: resetLabel(mk), p.accent, p.faint, p.muted, iconOnly.get() == true,
+        return ResetSpan(
+            mk.label ?: resetLabel(mk), p.accent, p.faint, p.muted, iconOnly,
             if (path != null) mk.icon!! else "rotate-ccw-square", path, mk.label != null,
         )
-        return SpannableStringBuilder("\uFFFC").also { it.setSpan(span, 0, 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE) }
     }
 
 

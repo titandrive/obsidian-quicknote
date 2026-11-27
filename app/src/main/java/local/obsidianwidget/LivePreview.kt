@@ -42,6 +42,11 @@ class LivePreview(
     private val tableRules: Set<Int> = emptySet(),
     /** Source mode: the markdown as written, unstyled; folding still works. */
     private val source: Boolean = false,
+    /**
+     * How wide Task Resetter's button for a marker is drawn, in ems of body text: its marker is
+     * hidden, but for room that wide, where the editor draws the button.
+     */
+    private val buttonWidth: (Markdown.Marker) -> Float = { 0f },
 ) : VisualTransformation {
 
     override fun filter(text: AnnotatedString): TransformedText {
@@ -128,11 +133,15 @@ class LivePreview(
     /** The lines given space above them (headings after text), as last annotated: their text sits at the bottom of the line. */
     val gaps = HashSet<Int>()
 
+    /** Task Resetter's buttons drawn in place of their markers, as last annotated: each marker's offset in the text, and it read. */
+    @Volatile var buttons: List<Pair<Int, Markdown.Marker>> = emptyList()
+
     fun annotate(text: String): AnnotatedString {
         val lines = text.split('\n')
         val out = AnnotatedString.Builder(text.length)
         val cut = ArrayList<Int>()
         val marks = ArrayList<Int>()
+        val shownButtons = ArrayList<Pair<Int, Markdown.Marker>>()
         // Each shown line's paragraph styles (callouts), applied once its line break is in, so they
         // take it in: one that stopped short left the break a paragraph of its own, an empty line.
         gaps.clear()
@@ -199,6 +208,17 @@ class LivePreview(
                     pending = listOf(AnnotatedString.Range(ParagraphStyle(lineHeight = rowHeight, lineHeightStyle = LineHeightStyle(LineHeightStyle.Alignment.Center, LineHeightStyle.Trim.None)), 0, 0))
                 } else {
                     out.append(AnnotatedString(styled.text.text, styled.text.spanStyles))
+                    // Task Resetter's markers drawn as its buttons, as in Obsidian, except while the
+                    // cursor is in one: the marker hidden but its "[", made as wide as the button.
+                    if (ctx.fence == null && !ctx.frontMatter) for ((m, mk) in resetMarkers(line)) {
+                        if (cursorCol in m.range.first..m.range.last + 1) continue
+                        out.addStyle(hidden, pendingStart + m.range.first + 1, pendingStart + m.range.last + 1)
+                        out.addStyle(
+                            SpanStyle(color = Color.Transparent, fontSize = baseSp.sp, letterSpacing = buttonWidth(mk).em),
+                            pendingStart + m.range.first, pendingStart + m.range.first + 1,
+                        )
+                        shownButtons.add(offset + m.range.first to mk)
+                    }
                     if (raw.length > line.length) out.append("\r")
                     pending = styled.text.paragraphStyles
                 }
@@ -210,7 +230,17 @@ class LivePreview(
         for (ps in pending) out.addStyle(ps.item, pendingStart + ps.start, out.length)
         removed = cut.toIntArray()
         ends = marks.toIntArray()
+        buttons = shownButtons
         return out.toAnnotatedString()
+    }
+
+    /** Task Resetter's markers in [line], outside `inline code`, each read. */
+    private fun resetMarkers(line: String): List<Pair<MatchResult, Markdown.Marker>> {
+        if (!line.contains("reset-tasks", ignoreCase = true)) return emptyList()
+        return Markdown.RESET_MARK.findAll(line).mapNotNull { m ->
+            if (line.substring(0, m.range.first).count { it == '`' } % 2 == 1) null
+            else Markdown.marker(m)?.let { m to it }
+        }.toList()
     }
 
     /** A table cell's text styled for drawing: inline formatting, markup hidden; the header's bold. */
