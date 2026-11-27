@@ -45,7 +45,8 @@ object TaskCleaner {
      */
     fun ticked(ctx: Context, cfg: WidgetConfig, text: String, line: Int, lock: Any) {
         val settings = settings(ctx, cfg) ?: return
-        if (settings.skipResetNotes && TASK_RESETTER_MARKER.containsMatchIn(text)) return
+        // Tasks a Task Resetter button resets stay, as Task Cleaner leaves them.
+        if (settings.skipResetNotes && TASK_RESETTER_MARKER.containsMatchIn(text) && line in Markdown.resetCovered(text)) return
         if (isIgnored(text)) return
         val app = ctx.applicationContext
         kotlin.concurrent.thread {
