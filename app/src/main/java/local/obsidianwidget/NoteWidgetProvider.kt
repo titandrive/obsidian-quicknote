@@ -297,9 +297,9 @@ class NoteWidgetProvider : AppWidgetProvider() {
             views.setViewVisibility(R.id.btn_settings, if (cfg.showSettings) android.view.View.VISIBLE else android.view.View.GONE)
             views.setOnClickPendingIntent(R.id.btn_read, activity(ctx, id, 7, tapIntent(ctx, id, "read").putExtra(TapActivity.EXTRA_READ, true)))
             views.setOnClickPendingIntent(R.id.btn_refresh, activity(ctx, id, 6, tapIntent(ctx, id, "refresh").putExtra(TapActivity.EXTRA_REFRESH, true)))
-            // Undo, in the accent colour, while a task Task Cleaner just hid or deleted can be put back.
+            // Undo, coloured like the other buttons, while a task Task Cleaner just hid or deleted can be put back.
             views.setViewVisibility(R.id.btn_undo, if (TaskCleaner.canUndo(ctx, cfg.noteUri)) android.view.View.VISIBLE else android.view.View.GONE)
-            color(views, R.id.btn_undo, "setColorFilter", looks) { it.accent }
+            color(views, R.id.btn_undo, "setColorFilter", looks) { it.muted }
             views.setOnClickPendingIntent(R.id.btn_undo, activity(ctx, id, 9, tapIntent(ctx, id, "undo").putExtra(TapActivity.EXTRA_UNDO, true)))
             try {
                 mgr.updateAppWidget(id, views)
